@@ -124,6 +124,7 @@ const IDM_LANG_GERMAN: u16 = 45;
 const IDM_LANG_JAPANESE: u16 = 46;
 const IDM_LANG_KOREAN: u16 = 47;
 const IDM_LANG_TRADITIONAL_CHINESE: u16 = 48;
+const IDM_LANG_CZECH: u16 = 49;
 const IDM_MODEL_CLAUDE_CODE: u16 = 60;
 const IDM_MODEL_CODEX: u16 = 61;
 const IDM_MODEL_ANTIGRAVITY: u16 = 62;
@@ -2355,6 +2356,7 @@ unsafe extern "system" fn wnd_proc(
                 }
                 IDM_LANG_SYSTEM
                 | IDM_LANG_ENGLISH
+                | IDM_LANG_CZECH
                 | IDM_LANG_DUTCH
                 | IDM_LANG_SPANISH
                 | IDM_LANG_FRENCH
@@ -2365,6 +2367,7 @@ unsafe extern "system" fn wnd_proc(
                     let language_override = match id {
                         IDM_LANG_SYSTEM => None,
                         IDM_LANG_ENGLISH => Some(LanguageId::English),
+                        IDM_LANG_CZECH => Some(LanguageId::Czech),
                         IDM_LANG_DUTCH => Some(LanguageId::Dutch),
                         IDM_LANG_SPANISH => Some(LanguageId::Spanish),
                         IDM_LANG_FRENCH => Some(LanguageId::French),
@@ -2592,6 +2595,7 @@ fn show_context_menu(hwnd: HWND) {
         for language in LanguageId::ALL {
             let id = match language {
                 LanguageId::English => IDM_LANG_ENGLISH,
+                LanguageId::Czech => IDM_LANG_CZECH,
                 LanguageId::Dutch => IDM_LANG_DUTCH,
                 LanguageId::Spanish => IDM_LANG_SPANISH,
                 LanguageId::French => IDM_LANG_FRENCH,
