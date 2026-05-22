@@ -72,7 +72,7 @@ struct CodexRateLimitWindow {
     reset_at: i64,
 }
 
-pub fn poll(show_claude_code: bool, show_codex: bool) -> Result<AppUsageData, PollError> {
+pub fn poll(show_claude_code: bool, show_codex: bool, show_antigravity: bool) -> Result<AppUsageData, PollError> {
     let mut data = AppUsageData::default();
 
     if show_claude_code {
@@ -82,12 +82,20 @@ pub fn poll(show_claude_code: bool, show_codex: bool) -> Result<AppUsageData, Po
     if show_codex {
         match poll_codex() {
             Ok(codex) => data.codex = Some(codex),
-            Err(error) if !show_claude_code => return Err(error),
+            Err(error) if !show_claude_code && !show_antigravity => return Err(error),
             Err(error) => diagnose::log(format!("Codex usage poll failed: {error:?}")),
         }
     }
 
-    if data.claude_code.is_none() && data.codex.is_none() {
+    if show_antigravity {
+        match poll_antigravity() {
+            Ok(antigravity) => data.antigravity = Some(antigravity),
+            Err(error) if !show_claude_code && !show_codex => return Err(error),
+            Err(error) => diagnose::log(format!("Antigravity usage poll failed: {error:?}")),
+        }
+    }
+
+    if data.claude_code.is_none() && data.codex.is_none() && data.antigravity.is_none() {
         Err(PollError::RequestFailed)
     } else {
         Ok(data)
@@ -1096,4 +1104,98 @@ pub fn is_past_reset(data: &UsageData) -> bool {
 pub fn app_is_past_reset(data: &AppUsageData) -> bool {
     data.claude_code.as_ref().is_some_and(is_past_reset)
         || data.codex.as_ref().is_some_and(is_past_reset)
+        || data.antigravity.as_ref().is_some_and(is_past_reset)
 }
+
+fn antigravity_history_path() -> Option<PathBuf> {
+    let home = dirs::home_dir()?;
+    Some(home.join(".gemini").join("antigravity-cli").join("history.jsonl"))
+}
+
+pub fn poll_antigravity() -> Result<UsageData, PollError> {
+    let path = match antigravity_history_path() {
+        Some(p) => p,
+        None => return Ok(UsageData::default()),
+    };
+
+    if !path.exists() {
+        return Ok(UsageData::default());
+    }
+
+    let file = match std::fs::File::open(&path) {
+        Ok(f) => f,
+        Err(e) => {
+            diagnose::log(format!("Failed to open Antigravity history file: {e}"));
+            return Ok(UsageData::default());
+        }
+    };
+
+    use std::io::{BufRead, BufReader};
+    let reader = BufReader::new(file);
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+
+    let five_hours_ms = 5 * 3600 * 1000;
+    let seven_days_ms = 7 * 86400 * 1000;
+
+    let mut session_timestamps = Vec::new();
+    let mut weekly_timestamps = Vec::new();
+
+    for line in reader.lines() {
+        let line = match line {
+            Ok(l) => l,
+            Err(_) => continue,
+        };
+        if line.trim().is_empty() {
+            continue;
+        }
+
+        #[derive(Deserialize)]
+        struct SimpleEntry {
+            timestamp: u64,
+        }
+
+        if let Ok(entry) = serde_json::from_str::<SimpleEntry>(&line) {
+            let ts = entry.timestamp;
+            if ts <= now_ms {
+                let age = now_ms - ts;
+                if age < five_hours_ms {
+                    session_timestamps.push(ts);
+                }
+                if age < seven_days_ms {
+                    weekly_timestamps.push(ts);
+                }
+            }
+        }
+    }
+
+    // Calculate session usage
+    let session_count = session_timestamps.len() as f64;
+    let session_limit = 30.0;
+    let session_percentage = ((session_count / session_limit) * 100.0).min(100.0);
+    let session_resets_at = session_timestamps.iter().min().map(|&oldest| {
+        UNIX_EPOCH + Duration::from_millis(oldest + five_hours_ms)
+    });
+
+    // Calculate weekly usage
+    let weekly_count = weekly_timestamps.len() as f64;
+    let weekly_limit = 150.0;
+    let weekly_percentage = ((weekly_count / weekly_limit) * 100.0).min(100.0);
+    let weekly_resets_at = weekly_timestamps.iter().min().map(|&oldest| {
+        UNIX_EPOCH + Duration::from_millis(oldest + seven_days_ms)
+    });
+
+    Ok(UsageData {
+        session: UsageSection {
+            percentage: session_percentage,
+            resets_at: session_resets_at,
+        },
+        weekly: UsageSection {
+            percentage: weekly_percentage,
+            resets_at: weekly_resets_at,
+        },
+    })
+}
+

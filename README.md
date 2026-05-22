@@ -1,30 +1,31 @@
 ![Windows](https://img.shields.io/badge/platform-Windows-blue)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-# Claude Code Usage Monitor
+# AI CLI Usage Monitor (Claude Code, Codex, Antigravity)
 
 ![Screenshot](.github/animation.gif)
 
-A lightweight Windows taskbar widget for people already using Claude Code, with optional Codex usage display.
+A lightweight Windows taskbar widget for people using Claude Code, ChatGPT Codex, and Google's Antigravity CLI (`agy`).
 
-It sits in your taskbar and shows how much of your Claude Code and/or Codex usage window you have left, without needing to open the terminal or the provider site.
+It sits in your taskbar and shows how much of your usage window you have left, without needing to open the terminal or provider sites.
 
 ## What You Get
 
-- A **5h** bar for your current 5-hour Claude usage window
-- A **7d** bar for your current 7-day window
-- Optional Codex usage bars alongside Claude Code
-- A live countdown until each limit resets
-- A small native widget that lives directly in the Windows taskbar
-- System tray icon badges showing your enabled model usage percentage
-- Left-click the tray icon to toggle the taskbar widget on or off
-- Right-click options for refresh, displayed models, update frequency, language, startup, and updates
+- A **5h** session bar for your Claude Code and Antigravity CLI usage (resets dynamically 5 hours after the oldest prompt in the active session window).
+- A **7d** weekly bar for your usage limits (resets dynamically 7 days after the oldest prompt in the active weekly window).
+- Optional Codex CLI usage bars alongside Claude Code and Antigravity CLI.
+- Sleek and harmony-rich visual indicators: Claude Code (Coral), ChatGPT Codex (Dark Monochrome), and Antigravity CLI (Premium Indigo `#6366F1`).
+- A live countdown until each limit resets.
+- A small native widget that lives directly in the Windows taskbar.
+- System tray icon badges showing your enabled model usage percentage.
+- Left-click the tray icon to toggle the taskbar widget on or off.
+- Right-click options for refresh, displayed models, update frequency, language, startup, and updates.
 
 ## Who This Is For
 
-This app is for Windows users who already have **Claude Code (CLI or App) installed and signed in**.
+This app is for Windows users who already use **Claude Code**, **ChatGPT Codex**, and/or Google's **Antigravity CLI** (`agy`).
 
-Codex support is optional. To show Codex usage, install and sign in to the Codex CLI, then enable Codex from the right-click **Models** menu.
+It parses your local Antigravity history (`~/.gemini/antigravity-cli/history.jsonl`) to dynamically monitor prompt consumption completely offline and asynchronously.
 
 It works best if you want a simple "how close am I to the limit?" display that is always visible.
 
@@ -32,7 +33,8 @@ It works best if you want a simple "how close am I to the limit?" display that i
 
 - Windows 10 or Windows 11
 - Claude Code (CLI or App) installed and authenticated
-- Optional: Codex CLI installed and authenticated, if you want Codex usage
+- Optional: Codex CLI installed and authenticated
+- Optional: Antigravity CLI installed (history parsed from local history file)
 
 If you use Claude Code through WSL, that is supported too. The monitor can read your Claude Code credentials from Windows or from your WSL environment.
 
@@ -41,10 +43,10 @@ If you use Claude Code through WSL, that is supported too. The monitor can read 
 Install the latest version from WinGet:
 
 ```powershell
-winget install CodeZeno.ClaudeCodeUsageMonitor
+winget install macekkrystof.ClaudeCodeUsageMonitor
 ```
 
-If you prefer not to use WinGet, you can still download the latest `claude-code-usage-monitor.exe` from the [Releases](https://github.com/CodeZeno/Claude-Code-Usage-Monitor/releases) page and run it directly.
+If you prefer not to use WinGet, you can still download the latest `claude-code-usage-monitor.exe` from the [Releases](https://github.com/macekkrystof/Claude-Code-Usage-Monitor/releases) page and run it directly.
 
 ## Use
 

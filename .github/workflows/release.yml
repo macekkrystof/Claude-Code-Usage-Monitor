@@ -10,7 +10,8 @@ permissions:
 
 env:
   RELEASE_ASSET_NAME: claude-code-usage-monitor.exe
-  WINGET_PACKAGE_ID: CodeZeno.ClaudeCodeUsageMonitor
+  WINGET_PACKAGE_ID: macekkrystof.ClaudeCodeUsageMonitor
+
 
 jobs:
   build:

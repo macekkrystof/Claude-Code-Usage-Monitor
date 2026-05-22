@@ -3,9 +3,10 @@ name = "claude-code-usage-monitor"
 version = "1.4.1"
 edition = "2021"
 license = "MIT"
-description = "Claude Code Usage Monitor"
-homepage = "https://codezeno.com.au"
-repository = "https://github.com/CodeZeno/Claude-Code-Usage-Monitor"
+description = "AI CLI Usage Monitor (Claude Code, Codex, Antigravity CLI)"
+homepage = "https://github.com/macekkrystof/Claude-Code-Usage-Monitor"
+repository = "https://github.com/macekkrystof/Claude-Code-Usage-Monitor"
+
 
 [package.metadata.winres]
 CompanyName = "Code Zeno Pty Ltd"

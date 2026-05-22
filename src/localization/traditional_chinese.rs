@@ -3,7 +3,7 @@ use super::Strings;
 pub(super) const UPDATE_VIA_WINGET_LABEL: &str = "透過 WinGet 更新";
 
 pub(super) const STRINGS: Strings = Strings {
-    window_title: "Claude Code 使用量監控",
+    window_title: "AI CLI 使用量監控",
     refresh: "重新整理",
     update_frequency: "更新頻率",
     one_minute: "1 分鐘",
@@ -13,6 +13,7 @@ pub(super) const STRINGS: Strings = Strings {
     models: "模型",
     claude_code_model: "Claude Code",
     codex_model: "Codex",
+    antigravity_model: "Antigravity",
     settings: "設定",
     start_with_windows: "開機時啟動",
     reset_position: "重置位置",
