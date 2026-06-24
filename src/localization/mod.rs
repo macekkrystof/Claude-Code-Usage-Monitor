@@ -1,3 +1,4 @@
+mod czech;
 mod dutch;
 mod english;
 mod french;
@@ -18,6 +19,7 @@ use windows::Win32::Globalization::{
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LanguageId {
     English,
+    Czech,
     Dutch,
     Spanish,
     French,
@@ -30,8 +32,9 @@ pub enum LanguageId {
 }
 
 impl LanguageId {
-    pub const ALL: [LanguageId; 10] = [
+    pub const ALL: [LanguageId; 11] = [
         LanguageId::English,
+        LanguageId::Czech,
         LanguageId::Dutch,
         LanguageId::Spanish,
         LanguageId::French,
@@ -46,6 +49,7 @@ impl LanguageId {
     pub fn code(self) -> &'static str {
         match self {
             Self::English => "en",
+            Self::Czech => "cs",
             Self::Dutch => "nl",
             Self::Spanish => "es",
             Self::French => "fr",
@@ -61,6 +65,7 @@ impl LanguageId {
     pub fn native_name(self) -> &'static str {
         match self {
             Self::English => "English",
+            Self::Czech => "Čeština",
             Self::Dutch => "Nederlands",
             Self::Spanish => "Español",
             Self::French => "Français",
@@ -76,6 +81,7 @@ impl LanguageId {
     pub fn strings(self) -> Strings {
         match self {
             Self::English => english::STRINGS,
+            Self::Czech => czech::STRINGS,
             Self::Dutch => dutch::STRINGS,
             Self::Spanish => spanish::STRINGS,
             Self::French => french::STRINGS,
@@ -91,6 +97,7 @@ impl LanguageId {
     pub fn update_via_winget_label(self) -> &'static str {
         match self {
             Self::English => english::UPDATE_VIA_WINGET_LABEL,
+            Self::Czech => czech::UPDATE_VIA_WINGET_LABEL,
             Self::Dutch => dutch::UPDATE_VIA_WINGET_LABEL,
             Self::Spanish => spanish::UPDATE_VIA_WINGET_LABEL,
             Self::French => french::UPDATE_VIA_WINGET_LABEL,
@@ -112,6 +119,7 @@ impl LanguageId {
         let prefix = normalized.split('-').next().unwrap_or_default();
         match prefix {
             "en" => Some(Self::English),
+            "cs" => Some(Self::Czech),
             "nl" => Some(Self::Dutch),
             "es" => Some(Self::Spanish),
             "fr" => Some(Self::French),
