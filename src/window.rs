@@ -590,10 +590,76 @@ fn taskbar_for_display(display_index: usize) -> Option<native_interop::TaskbarWi
     })
 }
 
+/// The display index owning the taskbar under `pt`, if any.
+fn display_at_taskbar_point(pt: POINT) -> Option<usize> {
+    let (_, taskbar) = taskbar_at_point(pt)?;
+    let monitor = unsafe { MonitorFromWindow(taskbar.hwnd, MONITOR_DEFAULTTOPRIMARY) };
+    native_interop::find_monitors()
+        .iter()
+        .position(|display| display.handle == monitor)
+}
+
+/// While dragging, hop the surface to whichever taskbar the cursor is over,
+/// re-anchoring the drag so the widget follows the cursor across monitors
+/// instead of pinning to the original taskbar's edge until drop.
+fn live_retarget_custom_theme(pt: POINT) {
+    let Some(target_display) = display_at_taskbar_point(pt) else {
+        return;
+    };
+    {
+        let mut state = lock_state();
+        let Some(s) = state.as_mut() else {
+            return;
+        };
+        let Some(theme) = s.active_theme.as_mut() else {
+            return;
+        };
+        let Some(surface) = theme.surfaces.first_mut() else {
+            return;
+        };
+        if surface.placement.reference.display == target_display {
+            return;
+        }
+        surface.placement.reference.display = target_display;
+        surface.placement.offset_x = 0;
+        theme.placement.reference.display = target_display;
+        theme.placement.offset_x = 0;
+    }
+    // Land at the new taskbar's default spot first to learn the offset->x
+    // base there, then re-anchor under the cursor.
+    position_at_taskbar();
+    {
+        let mut state = lock_state();
+        let Some(s) = state.as_mut() else {
+            return;
+        };
+        let hwnd = s.hwnd.to_hwnd();
+        let grab_x = s.drag_start_client_x;
+        let Some(window_rect) = native_interop::get_window_rect_safe(hwnd) else {
+            return;
+        };
+        let scale = display_scale(target_display).max(0.01);
+        let base = window_rect.left as f64; // offset_x is 0 here
+        let desired_left = (pt.x - grab_x) as f64;
+        let offset = ((desired_left - base) / scale).round() as i32;
+        let Some(theme) = s.active_theme.as_mut() else {
+            return;
+        };
+        if let Some(surface) = theme.surfaces.first_mut() {
+            surface.placement.offset_x = offset;
+        }
+        theme.placement.offset_x = offset;
+        s.drag_start_offset = offset;
+        s.drag_start_mouse_x = pt.x;
+    }
+    position_at_taskbar();
+}
+
 /// Move a dragged custom theme surface by updating its placement offset.
 /// The offset is clamped so the surface stays inside its host taskbar
 /// (a taskbar-nested child window is clipped, so leaving means vanishing).
 fn drag_custom_theme_move(pt: POINT) {
+    live_retarget_custom_theme(pt);
     let moved = {
         let mut state = lock_state();
         let Some(s) = state.as_mut() else {
