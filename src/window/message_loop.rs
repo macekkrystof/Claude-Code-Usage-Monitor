@@ -144,10 +144,10 @@ pub(super) unsafe extern "system" fn wnd_proc(
         WM_SETCURSOR if set_surface_cursor(hwnd) => LRESULT(1),
         WM_SETCURSOR => DefWindowProcW(hwnd, msg, wparam, lparam),
         WM_LBUTTONDOWN => {
-            // Interactive layers keep their click behaviour; pressing anywhere
-            // else on the widget starts a taskbar drag (restores the pre-2.x
-            // ability to reposition the widget, including across monitors).
-            if mouse_target_at(hwnd, lparam).is_none() {
+            // Left-clickable layers keep their click behaviour; pressing
+            // anywhere else on the widget starts a taskbar drag (restores the
+            // pre-2.x ability to reposition it, including across monitors).
+            if drag_point_eligible(hwnd, lparam) {
                 let client_x = (lparam.0 & 0xFFFF) as i16 as i32;
                 let mut pt = POINT::default();
                 let _ = GetCursorPos(&mut pt);

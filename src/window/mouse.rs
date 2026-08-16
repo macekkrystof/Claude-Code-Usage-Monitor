@@ -55,6 +55,19 @@ pub(super) fn mouse_handler_exists(
     })
 }
 
+/// A point is drag-eligible when pressing the left button there would not
+/// trigger any action — right-click-only layers (e.g. the widget root's
+/// context menu) still allow dragging.
+pub(super) fn drag_point_eligible(hwnd: HWND, lparam: LPARAM) -> bool {
+    match mouse_target_at(hwnd, lparam) {
+        None => true,
+        Some((surface, object)) => {
+            !mouse_handler_exists(surface, &object, MouseEventKind::Click)
+                && !mouse_handler_exists(surface, &object, MouseEventKind::DoubleClick)
+        }
+    }
+}
+
 pub(super) fn dispatch_mouse_event(
     surface_index: usize,
     object_id: &str,
@@ -311,19 +324,32 @@ pub(super) unsafe fn set_surface_cursor(hwnd: HWND) -> bool {
     let mut client = [point];
     MapWindowPoints(HWND::default(), hwnd, &mut client);
     let packed = ((client[0].y as u32 & 0xffff) << 16) | (client[0].x as u32 & 0xffff);
-    let Some((surface, object)) = mouse_target_at(hwnd, LPARAM(packed as isize)) else {
-        return false;
+    let lparam = LPARAM(packed as isize);
+    let is_main_window = {
+        let state = lock_state();
+        state.as_ref().is_some_and(|s| s.hwnd.to_hwnd() == hwnd)
     };
-    let clickable = [
-        MouseEventKind::Click,
-        MouseEventKind::DoubleClick,
-        MouseEventKind::RightClick,
-    ]
-    .into_iter()
-    .any(|event| mouse_handler_exists(surface, &object, event));
-    if clickable {
-        let cursor = LoadCursorW(HINSTANCE::default(), IDC_HAND).unwrap_or_default();
-        SetCursor(cursor);
+    if let Some((surface, object)) = mouse_target_at(hwnd, lparam) {
+        let left_clickable = [MouseEventKind::Click, MouseEventKind::DoubleClick]
+            .into_iter()
+            .any(|event| mouse_handler_exists(surface, &object, event));
+        if left_clickable {
+            let cursor = LoadCursorW(HINSTANCE::default(), IDC_HAND).unwrap_or_default();
+            SetCursor(cursor);
+            return true;
+        }
+        if !is_main_window && mouse_handler_exists(surface, &object, MouseEventKind::RightClick) {
+            let cursor = LoadCursorW(HINSTANCE::default(), IDC_HAND).unwrap_or_default();
+            SetCursor(cursor);
+            return true;
+        }
     }
-    clickable
+    if is_main_window {
+        // No left-click action here: the widget can be dragged from this
+        // point, so show the move cursor as the affordance.
+        let cursor = LoadCursorW(HINSTANCE::default(), IDC_SIZEALL).unwrap_or_default();
+        SetCursor(cursor);
+        return true;
+    }
+    false
 }
