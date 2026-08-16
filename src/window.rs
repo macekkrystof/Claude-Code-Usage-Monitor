@@ -15,7 +15,7 @@ use windows::Win32::UI::Accessibility::HWINEVENTHOOK;
 use windows::Win32::UI::Controls::WM_MOUSELEAVE;
 use windows::Win32::UI::HiDpi::*;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetDoubleClickTime, ReleaseCapture, TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT,
+    GetDoubleClickTime, ReleaseCapture, SetCapture, TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT,
 };
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::*;
@@ -160,6 +160,7 @@ const IDM_LANG_TRADITIONAL_CHINESE: u16 = 48;
 const IDM_LANG_RUSSIAN: u16 = 49;
 const IDM_LANG_PORTUGUESE_BRAZIL: u16 = 50;
 const IDM_LANG_SIMPLIFIED_CHINESE: u16 = 51;
+const IDM_LANG_CZECH: u16 = 52;
 const IDM_DASHBOARD: u16 = 71;
 
 const WM_DPICHANGED_MSG: u32 = 0x02E0;
@@ -576,6 +577,35 @@ fn taskbar_at_point(pt: POINT) -> Option<(usize, native_interop::TaskbarWindow)>
                 && pt.y >= taskbar.rect.top
                 && pt.y < taskbar.rect.bottom
         })
+}
+
+/// Point a custom theme at the display hosting `taskbar` and persist the
+/// change, so dropping the widget on another monitor's taskbar moves it there.
+fn move_custom_theme_to_taskbar_display(taskbar: native_interop::TaskbarWindow) {
+    let taskbar_monitor = unsafe { MonitorFromWindow(taskbar.hwnd, MONITOR_DEFAULTTOPRIMARY) };
+    let target_display = native_interop::find_monitors()
+        .iter()
+        .position(|display| display.handle == taskbar_monitor);
+    let Some(target_display) = target_display else {
+        return;
+    };
+    let theme_to_save = {
+        let mut state = lock_state();
+        let Some(theme) = state.as_mut().and_then(|s| s.active_theme.as_mut()) else {
+            return;
+        };
+        if theme.placement.reference.display == target_display {
+            return;
+        }
+        theme.placement.reference.display = target_display;
+        theme.clone()
+    };
+    if let Err(error) = theme_engine::save_theme(&theme_to_save) {
+        // Built-in themes are read-only; the move still applies until restart.
+        diagnose::log(format!("theme display change not persisted: {error}"));
+    }
+    position_at_taskbar();
+    render_layered();
 }
 
 fn tray_left_for_taskbar(taskbar_hwnd: HWND, taskbar_rect: RECT) -> i32 {

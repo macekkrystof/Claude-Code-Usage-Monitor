@@ -5,6 +5,8 @@ use super::LanguageId;
 pub(super) fn text(language: LanguageId, english: &'static str) -> Option<&'static str> {
     let locale = match language {
         LanguageId::English => return None,
+        // Czech translations live in czech::text so this table stays upstream-shaped.
+        LanguageId::Czech => return None,
         LanguageId::Dutch => 0,
         LanguageId::Spanish => 1,
         LanguageId::French => 2,

@@ -143,6 +143,26 @@ pub(super) unsafe extern "system" fn wnd_proc(
         }
         WM_SETCURSOR if set_surface_cursor(hwnd) => LRESULT(1),
         WM_SETCURSOR => DefWindowProcW(hwnd, msg, wparam, lparam),
+        WM_LBUTTONDOWN => {
+            // Interactive layers keep their click behaviour; pressing anywhere
+            // else on the widget starts a taskbar drag (restores the pre-2.x
+            // ability to reposition the widget, including across monitors).
+            if mouse_target_at(hwnd, lparam).is_none() {
+                let client_x = (lparam.0 & 0xFFFF) as i16 as i32;
+                let mut pt = POINT::default();
+                let _ = GetCursorPos(&mut pt);
+                let mut state = lock_state();
+                if let Some(s) = state.as_mut() {
+                    s.dragging = true;
+                    s.drag_start_mouse_x = pt.x;
+                    s.drag_start_client_x = client_x;
+                    s.drag_start_offset = s.tray_offset;
+                }
+                drop(state);
+                SetCapture(hwnd);
+            }
+            LRESULT(0)
+        }
         WM_MOUSEMOVE => {
             let is_dragging = {
                 let state = lock_state();
@@ -287,7 +307,17 @@ pub(super) unsafe extern "system" fn wnd_proc(
             if let Some((current_taskbar_index, drag_start_client_x)) = drag_result {
                 let _ = ReleaseCapture();
                 if let Some((target_index, target_taskbar)) = taskbar_at_point(pt) {
-                    if target_index != current_taskbar_index {
+                    let custom_theme_active = {
+                        let state = lock_state();
+                        state
+                            .as_ref()
+                            .is_some_and(|s| s.custom_theme_enabled && s.active_theme.is_some())
+                    };
+                    if custom_theme_active {
+                        // Custom themes place surfaces by display index, not by
+                        // taskbar offset, so retarget the theme instead.
+                        move_custom_theme_to_taskbar_display(target_taskbar);
+                    } else if target_index != current_taskbar_index {
                         let new_offset = offset_for_drop_point(
                             target_taskbar.hwnd,
                             target_taskbar.rect,
@@ -418,10 +448,12 @@ pub(super) unsafe extern "system" fn wnd_proc(
                 | IDM_LANG_TRADITIONAL_CHINESE
                 | IDM_LANG_SIMPLIFIED_CHINESE
                 | IDM_LANG_RUSSIAN
-                | IDM_LANG_PORTUGUESE_BRAZIL => {
+                | IDM_LANG_PORTUGUESE_BRAZIL
+                | IDM_LANG_CZECH => {
                     let language_override = match id {
                         IDM_LANG_SYSTEM => None,
                         IDM_LANG_ENGLISH => Some(LanguageId::English),
+                        IDM_LANG_CZECH => Some(LanguageId::Czech),
                         IDM_LANG_DUTCH => Some(LanguageId::Dutch),
                         IDM_LANG_SPANISH => Some(LanguageId::Spanish),
                         IDM_LANG_FRENCH => Some(LanguageId::French),

@@ -259,6 +259,7 @@ pub(super) fn execute_context_menu_action(
             } else {
                 LanguageId::from_code(language).map(|language| match language {
                     LanguageId::English => IDM_LANG_ENGLISH,
+                    LanguageId::Czech => IDM_LANG_CZECH,
                     LanguageId::Dutch => IDM_LANG_DUTCH,
                     LanguageId::Spanish => IDM_LANG_SPANISH,
                     LanguageId::French => IDM_LANG_FRENCH,
