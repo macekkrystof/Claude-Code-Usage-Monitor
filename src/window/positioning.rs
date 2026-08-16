@@ -241,7 +241,15 @@ pub(super) fn position_custom_theme_internal(hwnd: HWND, theme: &ThemeDocument, 
             .and_then(|taskbar| {
                 native_interop::find_child_window(taskbar.hwnd, "TrayNotifyWnd")
                     .and_then(native_interop::get_window_rect_safe)
-                    .or(Some(taskbar.rect))
+                    // Secondary taskbars have no TrayNotifyWnd; anchor to a
+                    // zero-width region at the taskbar's right edge, where the
+                    // tray lives (matches the legacy tray_left fallback).
+                    .or(Some(RECT {
+                        left: taskbar.rect.right,
+                        top: taskbar.rect.top,
+                        right: taskbar.rect.right,
+                        bottom: taskbar.rect.bottom,
+                    }))
             })
             .unwrap_or(display.rect),
     };
