@@ -156,7 +156,17 @@ pub(super) unsafe extern "system" fn wnd_proc(
                     s.dragging = true;
                     s.drag_start_mouse_x = pt.x;
                     s.drag_start_client_x = client_x;
-                    s.drag_start_offset = s.tray_offset;
+                    // Custom themes drag via their placement offset; the
+                    // legacy widget drags via the tray offset.
+                    s.drag_start_offset = if s.custom_theme_enabled {
+                        s.active_theme
+                            .as_ref()
+                            .and_then(|theme| theme.surfaces.first())
+                            .map(|surface| surface.placement.offset_x)
+                            .unwrap_or(s.tray_offset)
+                    } else {
+                        s.tray_offset
+                    };
                 }
                 drop(state);
                 SetCapture(hwnd);
@@ -171,6 +181,16 @@ pub(super) unsafe extern "system" fn wnd_proc(
             if is_dragging {
                 let mut pt = POINT::default();
                 let _ = GetCursorPos(&mut pt);
+                let custom_theme_active = {
+                    let state = lock_state();
+                    state
+                        .as_ref()
+                        .is_some_and(|s| s.custom_theme_enabled && s.active_theme.is_some())
+                };
+                if custom_theme_active {
+                    drag_custom_theme_move(pt);
+                    return LRESULT(0);
+                }
                 let move_target = {
                     let mut state = lock_state();
                     let s = match state.as_mut() {
@@ -306,18 +326,18 @@ pub(super) unsafe extern "system" fn wnd_proc(
             };
             if let Some((current_taskbar_index, drag_start_client_x)) = drag_result {
                 let _ = ReleaseCapture();
-                if let Some((target_index, target_taskbar)) = taskbar_at_point(pt) {
-                    let custom_theme_active = {
-                        let state = lock_state();
-                        state
-                            .as_ref()
-                            .is_some_and(|s| s.custom_theme_enabled && s.active_theme.is_some())
-                    };
-                    if custom_theme_active {
-                        // Custom themes place surfaces by display index, not by
-                        // taskbar offset, so retarget the theme instead.
-                        move_custom_theme_to_taskbar_display(target_taskbar);
-                    } else if target_index != current_taskbar_index {
+                let custom_theme_active = {
+                    let state = lock_state();
+                    state
+                        .as_ref()
+                        .is_some_and(|s| s.custom_theme_enabled && s.active_theme.is_some())
+                };
+                if custom_theme_active {
+                    // Custom themes place surfaces by display index and
+                    // placement offset, so retarget and persist the theme.
+                    finish_custom_theme_drag(taskbar_at_point(pt).map(|(_, taskbar)| taskbar));
+                } else if let Some((target_index, target_taskbar)) = taskbar_at_point(pt) {
+                    if target_index != current_taskbar_index {
                         let new_offset = offset_for_drop_point(
                             target_taskbar.hwnd,
                             target_taskbar.rect,

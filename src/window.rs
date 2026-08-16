@@ -581,28 +581,92 @@ fn taskbar_at_point(pt: POINT) -> Option<(usize, native_interop::TaskbarWindow)>
 
 /// Point a custom theme at the display hosting `taskbar` and persist the
 /// change, so dropping the widget on another monitor's taskbar moves it there.
-fn move_custom_theme_to_taskbar_display(taskbar: native_interop::TaskbarWindow) {
-    let taskbar_monitor = unsafe { MonitorFromWindow(taskbar.hwnd, MONITOR_DEFAULTTOPRIMARY) };
-    let target_display = native_interop::find_monitors()
-        .iter()
-        .position(|display| display.handle == taskbar_monitor);
-    let Some(target_display) = target_display else {
-        return;
+/// Find the taskbar hosting the display a custom theme surface is placed on.
+fn taskbar_for_display(display_index: usize) -> Option<native_interop::TaskbarWindow> {
+    let displays = native_interop::find_monitors();
+    let display = displays.get(display_index).copied()?;
+    native_interop::find_taskbars().into_iter().find(|taskbar| {
+        (unsafe { MonitorFromWindow(taskbar.hwnd, MONITOR_DEFAULTTOPRIMARY) }) == display.handle
+    })
+}
+
+/// Move a dragged custom theme surface by updating its placement offset.
+/// The offset is clamped so the surface stays inside its host taskbar
+/// (a taskbar-nested child window is clipped, so leaving means vanishing).
+fn drag_custom_theme_move(pt: POINT) {
+    let moved = {
+        let mut state = lock_state();
+        let Some(s) = state.as_mut() else {
+            return;
+        };
+        let hwnd = s.hwnd.to_hwnd();
+        let drag_start_mouse_x = s.drag_start_mouse_x;
+        let drag_start_offset = s.drag_start_offset;
+        let Some(theme) = s.active_theme.as_mut() else {
+            return;
+        };
+        let Some(surface) = theme.surfaces.first_mut() else {
+            return;
+        };
+        let display_index = surface.placement.reference.display;
+        let scale = display_scale(display_index).max(0.01);
+        let Some(taskbar) = taskbar_for_display(display_index) else {
+            return;
+        };
+        let Some(window_rect) = native_interop::get_window_rect_safe(hwnd) else {
+            return;
+        };
+        let width = window_rect.right - window_rect.left;
+        // The placement maps offset -> x linearly, so recover the base from
+        // the current position instead of duplicating the reference logic.
+        let base = window_rect.left as f64 - surface.placement.offset_x as f64 * scale;
+        let desired = drag_start_offset as f64 + (pt.x - drag_start_mouse_x) as f64 / scale;
+        let min_offset = (taskbar.rect.left as f64 - base) / scale;
+        let max_offset = ((taskbar.rect.right - width) as f64 - base) / scale;
+        let clamped = desired.clamp(min_offset, max_offset.max(min_offset));
+        let new_offset = clamped.round() as i32;
+        if new_offset == surface.placement.offset_x {
+            false
+        } else {
+            surface.placement.offset_x = new_offset;
+            theme.placement.offset_x = new_offset;
+            true
+        }
     };
+    if moved {
+        position_at_taskbar();
+    }
+}
+
+/// Finish a custom theme drag: retarget the surface to the display hosting
+/// the drop taskbar (if any) and persist the dragged placement. Placement is
+/// stored on the root surface — `ThemeDocument::placement` is only a runtime
+/// mirror that `prepare_runtime` rebuilds from it.
+fn finish_custom_theme_drag(target_taskbar: Option<native_interop::TaskbarWindow>) {
+    let target_display = target_taskbar.and_then(|taskbar| {
+        let monitor = unsafe { MonitorFromWindow(taskbar.hwnd, MONITOR_DEFAULTTOPRIMARY) };
+        native_interop::find_monitors()
+            .iter()
+            .position(|display| display.handle == monitor)
+    });
     let theme_to_save = {
         let mut state = lock_state();
         let Some(theme) = state.as_mut().and_then(|s| s.active_theme.as_mut()) else {
             return;
         };
-        if theme.placement.reference.display == target_display {
-            return;
+        if let Some(target_display) = target_display {
+            if let Some(surface) = theme.surfaces.first_mut() {
+                if surface.placement.reference.display != target_display {
+                    surface.placement.reference.display = target_display;
+                    theme.placement.reference.display = target_display;
+                }
+            }
         }
-        theme.placement.reference.display = target_display;
         theme.clone()
     };
     if let Err(error) = theme_engine::save_theme(&theme_to_save) {
         // Built-in themes are read-only; the move still applies until restart.
-        diagnose::log(format!("theme display change not persisted: {error}"));
+        diagnose::log(format!("theme drag change not persisted: {error}"));
     }
     position_at_taskbar();
     render_layered();
