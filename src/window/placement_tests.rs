@@ -18,6 +18,13 @@ fn negative_offsets_inset_right_bottom_anchored_desktop_surfaces() {
 }
 
 #[test]
+fn taskbar_surface_origins_stay_inside_the_host_bounds() {
+    assert_eq!(clamp_origin_to_bounds(-100, 554, 0, 1600), 0);
+    assert_eq!(clamp_origin_to_bounds(1_400, 554, 0, 1600), 1_046);
+    assert_eq!(clamp_origin_to_bounds(300, 200, 0, 1600), 300);
+}
+
+#[test]
 fn theme_dimensions_scale_from_logical_to_physical_pixels() {
     assert_eq!(scaled_theme_dimension(217, 1.0), 217);
     assert_eq!(scaled_theme_dimension(217, 1.25), 271);

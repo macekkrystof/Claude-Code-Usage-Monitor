@@ -273,6 +273,19 @@ pub(super) fn position_custom_theme_internal(hwnd: HWND, theme: &ThemeDocument, 
         horizontal_anchor_factor(surface_horizontal),
         (theme.placement.offset_x as f64 * scale).round() as i32,
     );
+    let nest = theme
+        .placement
+        .nest
+        .resolve(theme.placement.reference.region);
+    // Taskbar-hosted child windows are clipped by Explorer. Keep a persisted
+    // legacy/custom offset visible when the taskbar or widget width changed.
+    let x = if nest == SurfaceNest::Taskbar {
+        taskbar
+            .map(|taskbar| clamp_origin_to_bounds(x, width, taskbar.rect.left, taskbar.rect.right))
+            .unwrap_or(x)
+    } else {
+        x
+    };
     let y = aligned_origin(
         reference.top,
         reference_height,
@@ -281,10 +294,6 @@ pub(super) fn position_custom_theme_internal(hwnd: HWND, theme: &ThemeDocument, 
         vertical_anchor_factor(surface_vertical),
         (theme.placement.offset_y as f64 * scale).round() as i32,
     );
-    let nest = theme
-        .placement
-        .nest
-        .resolve(theme.placement.reference.region);
     unsafe {
         match nest {
             SurfaceNest::Taskbar => {
@@ -493,6 +502,16 @@ pub(super) fn aligned_origin(
         - surface_length as f64 * surface_factor)
         .round() as i32
         + offset
+}
+
+pub(super) fn clamp_origin_to_bounds(
+    origin: i32,
+    surface_length: i32,
+    bounds_start: i32,
+    bounds_end: i32,
+) -> i32 {
+    let max_origin = bounds_end.saturating_sub(surface_length).max(bounds_start);
+    origin.clamp(bounds_start, max_origin)
 }
 
 pub(super) fn horizontal_anchor_factor(anchor: HorizontalAnchor) -> f64 {
