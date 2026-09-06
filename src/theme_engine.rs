@@ -1304,6 +1304,57 @@ impl DataContext {
             }
             context.insert_provider("active", None);
         }
+        if let Some(data) = data {
+            let enabled = runtime.provider_enabled(ProviderId::Codex);
+            context.insert(
+                "accounts.count",
+                if enabled {
+                    data.account_order.iter().filter(|a| a.visible).count() as f64
+                } else {
+                    0.0
+                },
+            );
+            for account in &data.account_order {
+                let key = format!("accounts.{}", account.id);
+                let entry = data.accounts.get(&account.id);
+                context.insert_provider(&key, entry.and_then(|e| e.usage.as_ref()));
+                context.insert_string(&format!("{key}.name"), &account.name);
+                context.insert_string(&format!("{key}.color"), &account.color);
+                context.insert_string(&format!("{key}.identity"), &account.identity);
+                context.insert_string(
+                    &format!("{key}.status"),
+                    entry
+                        .and_then(|e| e.error.as_deref())
+                        .map(|error| match error {
+                            "Sign in again" => runtime.language.text("Sign in again"),
+                            _ => runtime.language.text("Unable to refresh usage"),
+                        })
+                        .unwrap_or_else(|| {
+                            runtime
+                                .language
+                                .text(if entry.is_some_and(|e| e.usage.is_some()) {
+                                    "Connected"
+                                } else {
+                                    "Waiting for usage"
+                                })
+                        }),
+                );
+                context.insert(
+                    &format!("{key}.enabled"),
+                    (enabled && account.visible) as u8 as f64,
+                );
+                context.insert(
+                    &format!("{key}.has_error"),
+                    entry.is_some_and(|e| e.error.is_some()) as u8 as f64,
+                );
+                context.insert(
+                    &format!("{key}.updated_unix"),
+                    entry.map_or(0, |e| e.updated_unix) as f64,
+                );
+            }
+        } else {
+            context.insert("accounts.count", 0.0);
+        }
         context
     }
 
@@ -1354,7 +1405,26 @@ impl DataContext {
     }
 
     pub fn get(&self, name: &str) -> Option<f64> {
-        self.values.get(&name.to_ascii_lowercase()).copied()
+        let name = name.to_ascii_lowercase();
+        self.values.get(&name).copied().or_else(|| {
+            let field = account_field(&name)?;
+            if matches!(
+                field,
+                "enabled" | "has_error" | "available" | "updated_unix"
+            ) {
+                return Some(0.0);
+            }
+            let (window, metric) = field.split_once('.')?;
+            if !matches!(window, "session" | "weekly") {
+                return None;
+            }
+            match metric {
+                "percentage" | "reset.unix" | "reset.seconds" | "reset.minutes" | "reset.hours"
+                | "reset.days" => Some(0.0),
+                "remaining" => Some(100.0),
+                _ => None,
+            }
+        })
     }
 
     pub fn insert_string(&mut self, name: &str, value: impl Into<String>) {
@@ -1365,6 +1435,27 @@ impl DataContext {
         self.strings
             .get(&name.to_ascii_lowercase())
             .map(String::as_str)
+            .or_else(|| match account_field(name)? {
+                "name" => Some("Codex"),
+                "color" => Some("#808080FF"),
+                "identity" | "status" => Some(""),
+                "weekly.label" => Some("7d"),
+                _ => None,
+            })
+    }
+
+    pub fn account_names(&self) -> Vec<(String, String)> {
+        let mut accounts: Vec<_> = self
+            .strings
+            .iter()
+            .filter_map(|(key, name)| {
+                key.strip_prefix("accounts.")
+                    .and_then(|key| key.strip_suffix(".name"))
+                    .map(|id| (format!("accounts.{id}"), name.clone()))
+            })
+            .collect();
+        accounts.sort();
+        accounts
     }
 
     pub fn with_object(mut self, object: &ResolvedObject<'_>) -> Self {
@@ -1376,6 +1467,14 @@ impl DataContext {
         self.insert("parent.height", object.parent_height);
         self
     }
+}
+
+fn account_field(name: &str) -> Option<&str> {
+    let (id, field) = name.strip_prefix("accounts.")?.split_once('.')?;
+    if id.is_empty() || !id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
+        return None;
+    }
+    Some(field)
 }
 
 fn action_target_id<'a>(target: &'a MouseActionTarget, self_id: &'a str) -> &'a str {
@@ -2122,7 +2221,7 @@ fn validate_expression(
 }
 
 fn validate_paint(errors: &mut Vec<String>, context: &DataContext, label: &str, paint: &Paint) {
-    if parse_color(&paint.color).is_none() {
+    if parse_color(&format_template(&paint.color, context)).is_none() {
         errors.push(format!(
             "{label}: '{}' is not #RRGGBB or #AARRGGBB",
             paint.color
@@ -2206,7 +2305,7 @@ impl Paint {
         }
     }
     pub fn resolve(&self, context: &DataContext) -> Rgba {
-        let mut rgba = parse_color(&self.color).unwrap_or(Rgba {
+        let mut rgba = parse_color(&format_template(&self.color, context)).unwrap_or(Rgba {
             r: 255,
             g: 0,
             b: 255,
@@ -2228,6 +2327,8 @@ pub use theme_rendering::*;
 
 mod theme_expression;
 pub use theme_expression::*;
+mod account_classic;
+pub use account_classic::account_classic;
 fn schema_version() -> u32 {
     THEME_SCHEMA_VERSION
 }

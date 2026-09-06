@@ -55,13 +55,25 @@ impl StudioApp {
             .as_deref()
             .and_then(|path| context_menu::load_context_menu(path).ok())
             .unwrap_or_else(context_menu::classic_context_menu);
-        let usage_cache = app_settings::load_usage_cache();
+        let mut usage_cache = app_settings::load_usage_cache();
+        if let Some(cache) = &mut usage_cache {
+            crate::accounts::reconcile(&mut cache.data, &settings.codex_accounts);
+            theme = theme_engine::account_classic(
+                &theme,
+                Some(&cache.data),
+                settings.enabled_providers(),
+            );
+        }
         let usage_poll_ok = usage_cache.as_ref().is_some_and(|cache| cache.poll_ok);
         let usage_has_error = usage_cache.as_ref().is_some_and(|cache| !cache.poll_ok);
         Self {
             owner,
             page: initial_page,
             settings,
+            account_login: None,
+            account_job: None,
+            account_error: None,
+            account_delete: None,
             startup_enabled: crate::window::is_startup_enabled(),
             theme,
             theme_path,
@@ -130,6 +142,16 @@ impl StudioApp {
     }
 
     pub(super) fn save_settings(&mut self) {
+        crate::accounts::reconcile(
+            self.usage.get_or_insert_with(Default::default),
+            &self.settings.codex_accounts,
+        );
+        self.theme = theme_engine::account_classic(
+            &self.theme,
+            self.usage.as_ref(),
+            self.settings.enabled_providers(),
+        );
+        self.preview_dirty = true;
         match app_settings::save_settings(&self.settings) {
             Ok(()) => {
                 self.settings_error = None;
@@ -704,10 +726,20 @@ impl StudioApp {
     }
 
     pub(super) fn refresh_usage_cache(&mut self) {
+        self.update_accounts();
         if self.last_cache_read.elapsed() >= Duration::from_secs(1) {
             self.last_cache_read = Instant::now();
             if let Some(cache) = app_settings::load_usage_cache() {
                 self.usage = Some(cache.data);
+                crate::accounts::reconcile(
+                    self.usage.as_mut().unwrap(),
+                    &self.settings.codex_accounts,
+                );
+                self.theme = theme_engine::account_classic(
+                    &self.theme,
+                    self.usage.as_ref(),
+                    self.settings.enabled_providers(),
+                );
                 self.usage_poll_ok = cache.poll_ok;
                 self.usage_has_error = !cache.poll_ok;
                 self.preview_dirty = true;

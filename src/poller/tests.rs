@@ -1,5 +1,57 @@
 use super::*;
 
+#[test]
+fn failed_account_keeps_stale_data_while_other_account_updates() {
+    let accounts = vec![
+        crate::accounts::Account::new(0),
+        crate::accounts::Account::new(1),
+    ];
+    let mut data = AppUsageData::default();
+    crate::accounts::reconcile(&mut data, &accounts);
+    update_account_result(
+        &mut data,
+        &accounts[0].id,
+        Ok(usage_with_session_percent(25.0)),
+    );
+    let updated = data.accounts[&accounts[0].id].updated_unix;
+    update_account_result(&mut data, &accounts[0].id, Err(PollError::AuthRequired));
+    update_account_result(
+        &mut data,
+        &accounts[1].id,
+        Ok(usage_with_session_percent(70.0)),
+    );
+    assert_eq!(
+        data.accounts[&accounts[0].id]
+            .usage
+            .as_ref()
+            .unwrap()
+            .session
+            .percentage,
+        25.0
+    );
+    assert_eq!(data.accounts[&accounts[0].id].updated_unix, updated);
+    assert_eq!(
+        data.accounts[&accounts[0].id].error.as_deref(),
+        Some("Sign in again")
+    );
+    assert_eq!(
+        data.accounts[&accounts[1].id]
+            .usage
+            .as_ref()
+            .unwrap()
+            .session
+            .percentage,
+        70.0
+    );
+    assert_eq!(data.all_usage().count(), 1);
+    update_account_result(
+        &mut data,
+        &accounts[0].id,
+        Ok(usage_with_session_percent(30.0)),
+    );
+    assert!(data.accounts[&accounts[0].id].error.is_none());
+}
+
 fn usage_with_session_percent(percentage: f64) -> UsageData {
     UsageData {
         session: UsageSection {

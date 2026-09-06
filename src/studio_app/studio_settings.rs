@@ -94,6 +94,7 @@ impl StudioApp {
                     );
                 }
             });
+            changed |= self.accounts_section(ui);
             section(ui, language.text("Display"), |ui| {
                 setting_row(
                     ui,

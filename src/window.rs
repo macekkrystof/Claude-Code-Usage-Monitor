@@ -378,7 +378,8 @@ fn theme_runtime_from_state(state: &AppState) -> ThemeRuntime {
 
 fn effective_theme_from_state(state: &AppState) -> Option<ThemeDocument> {
     state.active_theme.as_ref().map(|theme| {
-        theme_engine::apply_mouse_action_overrides(theme, &state.mouse_action_overrides)
+        let theme = theme_engine::account_classic(theme, state.data.as_ref(), state.providers);
+        theme_engine::apply_mouse_action_overrides(&theme, &state.mouse_action_overrides)
     })
 }
 
@@ -1723,7 +1724,13 @@ pub fn run() {
                 language,
                 install_channel,
                 providers: settings.enabled_providers(),
-                data: None,
+                data: Some({
+                    let mut data = app_settings::load_usage_cache()
+                        .map(|cache| cache.data)
+                        .unwrap_or_default();
+                    crate::accounts::reconcile(&mut data, &settings.codex_accounts);
+                    data
+                }),
                 poll_interval_ms: settings.poll_interval_ms,
                 retry_count: 0,
                 force_notify_auth_error: false,
@@ -1985,16 +1992,24 @@ fn poll_worker(send_hwnd: SendHwnd) {
 }
 
 fn do_poll_once(hwnd: HWND) {
-    let enabled_providers = {
+    let settings = load_settings();
+    let previous = {
         let state = lock_state();
         state
             .as_ref()
-            .map(|state| state.providers)
+            .and_then(|state| state.data.clone())
             .unwrap_or_default()
     };
 
-    match poller::poll(enabled_providers) {
-        Ok(data) => {
+    match poller::poll(&settings, &previous) {
+        Ok(mut data) => {
+            let current = load_settings();
+            if current.codex_accounts != settings.codex_accounts
+                || current.enabled_providers() != settings.enabled_providers()
+            {
+                return;
+            }
+            crate::accounts::reconcile(&mut data, &current.codex_accounts);
             let cache_data = data.clone();
             let mut state = lock_state();
             if let Some(s) = state.as_mut() {
@@ -2145,8 +2160,8 @@ fn schedule_countdown_timer() {
     }
 
     let min_delay = data
-        .iter()
-        .flat_map(|(_, usage)| [&usage.session, &usage.weekly])
+        .all_usage()
+        .flat_map(|usage| [&usage.session, &usage.weekly])
         .filter_map(|section| poller::time_until_display_change(section.resets_at))
         .min();
 
@@ -2196,7 +2211,15 @@ fn reload_external_settings(hwnd: HWND) {
         let Some(state) = state.as_mut() else {
             return;
         };
-        providers_changed = state.providers != settings.enabled_providers();
+        providers_changed = state.providers != settings.enabled_providers()
+            || state
+                .data
+                .as_ref()
+                .is_none_or(|data| data.account_order != settings.codex_accounts);
+        crate::accounts::reconcile(
+            state.data.get_or_insert_with(Default::default),
+            &settings.codex_accounts,
+        );
         state.poll_interval_ms = settings.poll_interval_ms;
         state.providers = settings.enabled_providers();
         state.taskbar_index = settings.taskbar_index;

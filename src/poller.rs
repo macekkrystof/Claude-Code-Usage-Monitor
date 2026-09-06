@@ -26,8 +26,59 @@ pub struct PollFailure {
     pub error: PollError,
 }
 
-pub fn poll(enabled_providers: ProviderSet) -> Result<AppUsageData, PollFailure> {
-    poll_with(enabled_providers, poll_provider)
+pub fn poll(
+    settings: &crate::app_settings::SettingsFile,
+    previous: &AppUsageData,
+) -> Result<AppUsageData, PollFailure> {
+    let enabled = settings.enabled_providers();
+    let others = ProviderSet::from_enabled(enabled.iter().filter(|p| *p != ProviderId::Codex));
+    let result = poll_with(others, poll_provider);
+    if !enabled.contains(ProviderId::Codex) {
+        return result.map(|mut data| {
+            data.accounts = previous.accounts.clone();
+            crate::accounts::reconcile(&mut data, &settings.codex_accounts);
+            data
+        });
+    }
+    let mut data = result.unwrap_or_default();
+    data.accounts = previous.accounts.clone();
+    crate::accounts::reconcile(&mut data, &settings.codex_accounts);
+    for account in settings.codex_accounts.iter().filter(|a| a.visible) {
+        let result = match account.source {
+            crate::accounts::AccountSource::LocalCli => codex::poll_codex(),
+            crate::accounts::AccountSource::OAuth => {
+                crate::codex_oauth::with_token(&account.id, |token, workspace| {
+                    codex::fetch_codex_usage(token, Some(workspace))
+                })
+            }
+        };
+        update_account_result(&mut data, &account.id, result);
+    }
+    data.refresh_codex_alias();
+    // Account failures are local state. Never pause other accounts for one expired login.
+    Ok(data)
+}
+
+fn update_account_result(data: &mut AppUsageData, id: &str, result: Result<UsageData, PollError>) {
+    let entry = data.accounts.entry(id.into()).or_default();
+    match result {
+        Ok(usage) => {
+            entry.usage = Some(usage);
+            entry.updated_unix = crate::accounts::now_unix();
+            entry.error = None;
+        }
+        Err(error) => {
+            entry.error = Some(
+                match error {
+                    PollError::NoCredentials
+                    | PollError::TokenExpired
+                    | PollError::AuthRequired => "Sign in again",
+                    PollError::RequestFailed => "Unable to refresh usage",
+                }
+                .into(),
+            );
+        }
+    }
 }
 
 fn poll_with(
@@ -255,7 +306,7 @@ pub fn is_past_reset(data: &UsageData) -> bool {
 }
 
 pub fn app_is_past_reset(data: &AppUsageData) -> bool {
-    data.iter().any(|(_, usage)| is_past_reset(usage))
+    data.all_usage().any(is_past_reset)
 }
 
 #[cfg(test)]
