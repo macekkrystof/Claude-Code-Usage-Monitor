@@ -48,6 +48,8 @@ pub struct SettingsFile {
     show_claude_code: bool,
     #[serde(default)]
     show_codex: bool,
+    #[serde(default = "crate::accounts::legacy_accounts")]
+    pub codex_accounts: Vec<crate::accounts::Account>,
     #[serde(default)]
     show_antigravity: bool,
     #[serde(default)]
@@ -77,6 +79,7 @@ impl Default for SettingsFile {
             last_update_check_unix: None,
             show_claude_code: true,
             show_codex: false,
+            codex_accounts: crate::accounts::legacy_accounts(),
             show_antigravity: false,
             show_opencode: false,
             show_cursor: false,
@@ -324,6 +327,19 @@ fn now_unix() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn account_migration_distinguishes_missing_from_explicitly_empty() {
+        let legacy = decode_settings(r#"{"show_codex":true}"#).unwrap();
+        assert_eq!(legacy.codex_accounts, crate::accounts::legacy_accounts());
+        let mut empty = decode_settings(r#"{"show_codex":true,"codex_accounts":[]}"#).unwrap();
+        empty.normalize();
+        assert!(empty.codex_accounts.is_empty());
+        assert!(decode_settings(&settings_json(&empty).to_string())
+            .unwrap()
+            .codex_accounts
+            .is_empty());
+    }
 
     #[test]
     fn settings_never_disable_every_provider() {

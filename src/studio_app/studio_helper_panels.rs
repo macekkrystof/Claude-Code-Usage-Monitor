@@ -863,7 +863,33 @@ pub(super) fn expression_variables_panel(
                     draft,
                     language,
                 );
-                let mut providers = vec!["providers.count".to_string()];
+                for (key, name) in context.account_names() {
+                    let mut fields = vec![
+                        format!("{key}.enabled"),
+                        format!("{key}.has_error"),
+                        format!("{key}.available"),
+                        format!("{key}.updated_unix"),
+                    ];
+                    for window in ["session", "weekly"] {
+                        for metric in [
+                            "percentage",
+                            "remaining",
+                            "reset.unix",
+                            "reset.seconds",
+                            "reset.minutes",
+                            "reset.hours",
+                            "reset.days",
+                        ] {
+                            fields.push(format!("{key}.{window}.{metric}"));
+                        }
+                    }
+                    let fields: Vec<_> = fields.iter().map(String::as_str).collect();
+                    expression_variable_group(
+                        ui, &name, &fields, &needle, context, draft, language,
+                    );
+                }
+                let mut providers =
+                    vec!["providers.count".to_string(), "accounts.count".to_string()];
                 providers.extend(
                     PROVIDER_DESCRIPTORS
                         .iter()

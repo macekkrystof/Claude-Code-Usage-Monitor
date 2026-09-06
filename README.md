@@ -31,7 +31,17 @@ It sits in your taskbar and shows how much of your Claude Code, Codex, Antigravi
 
 This app is for Windows users who already have **Claude Code (CLI or App) installed and signed in**.
 
-Codex support is optional. To show Codex usage, install and sign in to the Codex CLI, then enable Codex in the dashboard's **Providers** section.
+Codex support is optional. In the dashboard's **Codex accounts** section, choose **Add Codex account** and sign in in your browser. You can add multiple accounts without installing the Codex CLI. Existing installations keep their local CLI login as a separate account.
+
+### Multiple Codex accounts
+
+Each account has an editable name, colour, visibility and order. The Classic widget displays visible accounts side by side with their own 5-hour and weekly usage. Errors and reconnect requests apply to the affected account only. **Remove account** removes the monitor's local credentials; it does not sign you out of Codex CLI or your browser. To choose a different account, use the account switch/sign-out controls on the provider's sign-in page.
+
+New accounts use the browser authorization-code/PKCE flow directly, with no CLI subprocess. The callback listens only on loopback (port 1455, or 1457 if busy), validates a random state, and closes after completion, cancellation or five minutes. Credentials are encrypted for the current Windows user using DPAPI under `%APPDATA%\ClaudeCodeUsageMonitor\accounts`; names and display preferences are in `settings.json`. Refresh tokens are rotated under a per-account cross-process lock. These files cannot be moved to another Windows account as a way to transfer a login; sign in there again.
+
+This integration follows the public Codex OAuth implementation (reference revision `ac192cd7937b0d73edc6dffe009940ae53782dd4`, `codex-rs/login/src/server.rs` and `auth/manager.rs` in [openai/codex](https://github.com/openai/codex)). It uses the Codex public client ID and the existing ChatGPT usage endpoint. This is not a separately registered third-party OAuth application or a guarantee that OpenAI will keep these endpoints compatible. Provider-side login changes may require an update.
+
+Theme Studio's expression helper lists account variables, and the text helper has **Insert account value**. Each account has a stable `accounts.<id>` prefix with `name`, `identity`, `color`, `enabled`, `available`, `has_error`, `status`, `updated_unix`, and the existing `session`/`weekly` metrics. For example, `{accounts.<id>.session:usage_line}` displays usage and reset; a colour field can use `{accounts.<id>.color}`. Existing `codex.*` expressions follow the first visible Codex account, without combining quotas. `accounts.count` counts visible Codex accounts; `providers.count` retains its original meaning. Custom themes keep their geometry. Anthropic multi-account login is not part of this version.
 
 Antigravity support is optional too. To show Antigravity usage, install and sign in to Google Antigravity, then enable it in the dashboard's **Providers** section.
 
@@ -56,7 +66,7 @@ It works best if you want a simple "how close am I to the limit?" display that i
 
 - Windows 10 or Windows 11
 - Claude Code (CLI or App) installed and authenticated
-- Optional: Codex CLI installed and authenticated, if you want Codex usage
+- Optional: a ChatGPT account with Codex access (or an existing authenticated Codex CLI)
 - Optional: Google Antigravity installed and authenticated, if you want Antigravity usage
 - Optional: OpenCode installed and connected to OpenCode Go, if you want OpenCode usage
 - Optional: Cursor installed and authenticated, if you want Cursor usage
@@ -201,6 +211,7 @@ What the app reads:
 - Your local Claude Code OAuth credentials from `~/.claude/.credentials.json`
 - If needed, the same credentials file inside an installed WSL distro
 - If Codex is enabled, your local Codex credentials from `$CODEX_HOME/auth.json` or `~/.codex/auth.json`
+- For accounts added in the dashboard, the monitor's own DPAPI-encrypted Codex credentials instead
 - If Antigravity is enabled, your local Antigravity OAuth token from Windows Credential Manager target `gemini:antigravity`
 - If OpenCode is enabled, its dashboard workspace ID and auth cookie
 - If Cursor is enabled, its access token from Cursor's local `state.vscdb`, or `CURSOR_SESSION_TOKEN` when set
@@ -211,6 +222,7 @@ What the app sends over the network:
 
 - Requests to Anthropic's Claude endpoints to read your usage and rate-limit information
 - Requests to ChatGPT's Codex usage endpoint to read your Codex usage and rate-limit information, if Codex is enabled
+- Requests to `auth.openai.com` to sign in and refresh dashboard-managed Codex accounts
 - Requests to Google's Cloud Code / Antigravity endpoints to read your Antigravity quota information, if Antigravity is enabled
 - Requests to the OpenCode workspace dashboard to read OpenCode Go usage, if OpenCode is enabled and dashboard credentials are configured
 - Requests to `cursor.com/api/usage-summary` to read Cursor plan usage, if Cursor is enabled
@@ -225,6 +237,7 @@ What the app stores locally:
 - Language preference
 - Last update check time
 - Displayed model preferences
+- Codex account names, colours, ordering and encrypted credentials for dashboard-managed accounts
 - Active custom theme, canvas placement, and theme files
 
 What it does **not** do:
@@ -239,7 +252,7 @@ What it does **not** do:
 Notes:
 
 - If your Claude Code token is expired, the app may ask the local Claude CLI to refresh it in the background
-- If your Codex token is expired, the app may ask the local Codex CLI to refresh it in the background. The monitor does not write `auth.json` itself; any credential update is handled by the Codex CLI.
+- Dashboard-managed Codex accounts refresh their own tokens directly. The legacy local CLI account retains the previous CLI refresh behavior; the monitor never writes the CLI's `auth.json` itself.
 - If your Antigravity token is expired, open Antigravity and sign in again. The monitor does not write Windows Credential Manager entries itself.
 - Portable installs can update themselves by downloading the latest release from this repository
 - Proxies should be trusted because proxied usage requests include your OAuth bearer token inside the TLS connection

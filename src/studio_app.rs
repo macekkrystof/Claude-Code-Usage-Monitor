@@ -440,6 +440,10 @@ struct StudioApp {
     owner: isize,
     page: Page,
     settings: SettingsFile,
+    account_login: Option<crate::codex_oauth::LoginTask>,
+    account_job: Option<std::sync::mpsc::Receiver<Result<studio_accounts::AccountChange, String>>>,
+    account_error: Option<String>,
+    account_delete: Option<String>,
     startup_enabled: bool,
     theme: ThemeDocument,
     theme_path: Option<PathBuf>,
@@ -485,6 +489,7 @@ struct StudioApp {
     delete_context_menu_confirmation: Option<(PathBuf, String)>,
 }
 
+mod studio_accounts;
 mod studio_assets;
 mod studio_context_menus;
 mod studio_core;
@@ -602,6 +607,10 @@ impl eframe::App for StudioApp {
             self.settings.dashboard_height = Some(size.y);
         }
         let close_requested = ui.ctx().input(|input| input.viewport().close_requested());
+        if close_requested && self.account_job.is_some() {
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        }
         if close_requested && (self.dirty || self.pending_unsaved_action.is_some()) {
             ui.ctx()
                 .send_viewport_cmd(egui::ViewportCommand::CancelClose);

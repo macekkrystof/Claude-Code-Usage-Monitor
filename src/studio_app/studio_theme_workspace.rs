@@ -510,6 +510,27 @@ impl StudioApp {
             |draft| theme_engine::validate_template(draft, &context),
             |draft| theme_engine::format_template(draft, &context),
             |ui, editor, panel_height| {
+                let account_names = context.account_names();
+                if !account_names.is_empty() {
+                    ui.menu_button(language.text("Insert account value"), |ui| {
+                        for (key, name) in &account_names {
+                            ui.menu_button(name, |ui| {
+                                for (label, suffix) in [
+                                    ("Name", "name"),
+                                    ("Colour", "color"),
+                                    ("Status", "status"),
+                                    ("5h", "session:usage_line"),
+                                    ("7d", "weekly:usage_line"),
+                                ] {
+                                    if ui.button(language.text(label)).clicked() {
+                                        editor.draft.push_str(&format!("{{{key}.{suffix}}}"));
+                                        ui.close();
+                                    }
+                                }
+                            });
+                        }
+                    });
+                }
                 let panel_gap = ui.spacing().item_spacing.x;
                 let usable_width = (ui.available_width() - panel_gap * 2.0).max(1.0);
                 let values_width = usable_width * 0.45;

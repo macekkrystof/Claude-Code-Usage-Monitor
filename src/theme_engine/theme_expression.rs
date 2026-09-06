@@ -311,24 +311,32 @@ pub fn parse_color(source: &str) -> Option<Rgba> {
 }
 
 pub(super) fn format_usage_line(base: &str, context: &DataContext) -> Option<String> {
-    let mut parts = base.split('.');
-    let provider = parts.next()?;
-    let window = parts.next()?;
-    if parts.next().is_some()
-        || !matches!(
+    let (provider, window) = base.rsplit_once('.')?;
+    let account = provider.starts_with("accounts.");
+    if (!account
+        && !matches!(
             provider,
             "active" | "claude" | "codex" | "antigravity" | "opencode" | "cursor"
-        )
+        ))
         || !matches!(window, "session" | "weekly")
     {
         return None;
     }
-    if context.get("data.loading").unwrap_or(0.0) != 0.0 {
+    if !account && context.get("data.loading").unwrap_or(0.0) != 0.0 {
         return Some("--".into());
     }
-    if context.get("data.has_error").unwrap_or(0.0) != 0.0
-        || (context.get("data.poll_ok").unwrap_or(1.0) != 0.0
-            && context.get(&format!("{provider}.available")).unwrap_or(0.0) == 0.0)
+    if account {
+        if context.get(&format!("{provider}.has_error")).unwrap_or(0.0) != 0.0 {
+            return Some("!".into());
+        }
+        if context.get(&format!("{provider}.available")).unwrap_or(0.0) == 0.0 {
+            return Some("--".into());
+        }
+    }
+    if !account
+        && (context.get("data.has_error").unwrap_or(0.0) != 0.0
+            || (context.get("data.poll_ok").unwrap_or(1.0) != 0.0
+                && context.get(&format!("{provider}.available")).unwrap_or(0.0) == 0.0))
     {
         return Some("!".into());
     }
