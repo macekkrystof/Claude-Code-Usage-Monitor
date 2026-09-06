@@ -7,7 +7,8 @@ pub fn account_classic(
     providers: ProviderSet,
 ) -> ThemeDocument {
     let mut result = theme.clone();
-    if theme.is_builtin_classic()
+    let classic_compatible = theme.is_builtin_classic() || theme.id == "migrated-theme";
+    if classic_compatible
         && theme.surfaces.first().is_some_and(|root| {
             root.children
                 .iter()
@@ -19,7 +20,7 @@ pub fn account_classic(
         result.surfaces[0].placement = theme.surfaces[0].placement.clone();
         result.surfaces[0].render = theme.surfaces[0].render.clone();
     }
-    if !theme.is_builtin_classic() || !providers.contains(ProviderId::Codex) {
+    if !classic_compatible || !providers.contains(ProviderId::Codex) {
         return result;
     }
     let Some(data) = data else {
@@ -325,5 +326,44 @@ mod tests {
             restored.surfaces[0].children.len(),
             ThemeDocument::starter().surfaces[0].children.len()
         );
+    }
+
+    #[test]
+    fn migrated_classic_theme_expands_accounts_and_keeps_legacy_placement() {
+        let (data, providers) = fixture();
+        let theme = ThemeDocument::migrated_from_legacy(Some((1, -37)), true);
+        let expanded = account_classic(&theme, Some(&data), providers);
+        assert_eq!(
+            expanded
+                .surfaces
+                .first()
+                .map(|surface| surface.placement.reference.display),
+            Some(1usize)
+        );
+        assert_eq!(
+            expanded
+                .surfaces
+                .first()
+                .map(|surface| surface.placement.offset_x),
+            Some(-37)
+        );
+        assert_eq!(
+            expanded
+                .surfaces
+                .first()
+                .into_iter()
+                .flat_map(|surface| surface.children.iter())
+                .filter(|child| child.id.starts_with("column-"))
+                .count(),
+            2
+        );
+        assert!(render_theme_surface_with_runtime(
+            &expanded,
+            0,
+            Some(&data),
+            ThemeRuntime::from_providers(providers)
+        )
+        .warnings
+        .is_empty());
     }
 }
