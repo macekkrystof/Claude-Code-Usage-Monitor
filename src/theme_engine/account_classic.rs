@@ -1,6 +1,11 @@
 use super::*;
 use crate::accounts::{Account, AccountUsage};
 
+const CLASSIC_COLUMN_STEP: usize = 164;
+const CLASSIC_COLUMN_WIDTH: f64 = 160.0;
+const CLASSIC_VALUE_X: f64 = 90.0;
+const CLASSIC_VALUE_WIDTH: f64 = 70.0;
+
 /// Expand only the bundled Classic scene. Custom themes retain their saved geometry.
 pub fn account_classic(
     theme: &ThemeDocument,
@@ -60,12 +65,12 @@ pub fn account_classic(
                 ));
             }
         }
-        root.width = ((columns.len().max(1) * 182 + 8) as f64).into();
+        root.width = ((columns.len().max(1) * CLASSIC_COLUMN_STEP + 8) as f64).into();
         root.height = 46.0.into();
         for (index, (key, name, color)) in columns.iter().enumerate() {
             let mut column = SceneObject::object(format!("column-{key}"), name);
-            column.x = (4.0 + index as f64 * 182.0).into();
-            column.width = 178.0.into();
+            column.x = (4.0 + index as f64 * CLASSIC_COLUMN_STEP as f64).into();
+            column.width = CLASSIC_COLUMN_WIDTH.into();
             column.height = 46.0.into();
             let title = if name.chars().count() > 23 {
                 format!("{}…", name.chars().take(22).collect::<String>())
@@ -81,7 +86,7 @@ pub fn account_classic(
                 if key.starts_with("accounts.") {
                     88.0
                 } else {
-                    176.0
+                    CLASSIC_COLUMN_WIDTH
                 },
                 color,
                 11.0,
@@ -90,9 +95,9 @@ pub fn account_classic(
                 let mut reset = text(
                     &format!("{key}-reset-credits"),
                     &format!("{{{key}.reset_credits.suffix}}"),
-                    90.0,
+                    CLASSIC_VALUE_X,
                     0.0,
-                    88.0,
+                    CLASSIC_VALUE_WIDTH,
                     color,
                     8.0,
                 );
@@ -147,9 +152,9 @@ pub fn account_classic(
                 column.children.push(text(
                     &format!("{key}-{window}-value"),
                     &format!("{{{key}.{window}:usage_line}}"),
-                    90.0,
+                    CLASSIC_VALUE_X,
                     y,
-                    88.0,
+                    CLASSIC_VALUE_WIDTH,
                     color,
                     10.0,
                 ));
@@ -400,7 +405,7 @@ mod tests {
             let rendered =
                 render_theme_surface_with_runtime_at_scale(&theme, 0, Some(&data), runtime, scale);
             assert!(rendered.warnings.is_empty(), "{:?}", rendered.warnings);
-            assert_eq!(rendered.width, (372.0 * scale) as u32);
+            assert_eq!(rendered.width, (336.0 * scale) as u32);
             assert_eq!(rendered.height, (46.0 * scale) as u32);
             // Save an opaque dark-background preview for visual inspection, using actual renderer output.
             let bytes: Vec<u8> = rendered
@@ -560,7 +565,7 @@ mod tests {
         .is_empty());
         data.account_order[0].visible = false;
         let hidden = account_classic(&theme, Some(&data), providers);
-        assert_eq!(hidden.canvas.width, 190);
+        assert_eq!(hidden.canvas.width, 172);
         let restored = account_classic(&hidden, Some(&data), ProviderSet::default());
         assert_eq!(
             restored.surfaces[0].children.len(),

@@ -1,6 +1,6 @@
 # Follow-up TODO
 
-All follow-ups in this file are complete for v2.4.0.
+All follow-ups in this file are complete for v2.4.1.
 
 ## Per-account Codex tray icons
 
@@ -12,6 +12,8 @@ All follow-ups in this file are complete for v2.4.0.
   register an icon with Explorer.
 - [x] Renderer and tray synchronisation cover zero, one, and multiple accounts,
   account removal, and Explorer/taskbar restart recovery.
+- [x] Compact the Classic column step and value widths so adjacent provider
+  columns remain close at high DPI without overlapping their contents.
 
 ## Show Codex reset availability
 
