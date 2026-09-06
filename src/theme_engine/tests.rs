@@ -294,6 +294,7 @@ fn usage_lines_handle_loading_errors_missing_resets_and_language() {
             },
             weekly: crate::models::UsageSection::default(),
             weekly_label: None,
+            reset_credits_available: None,
         },
     )]);
     let ready = DataContext::from_usage_with_runtime(
@@ -318,6 +319,63 @@ fn usage_lines_handle_loading_errors_missing_resets_and_language() {
         "1시간"
     );
     assert_eq!(format_template("{codex.session:usage_line}", &ready), "!");
+}
+
+#[test]
+fn reset_credit_templates_distinguish_present_zero_and_missing_values() {
+    let account = crate::accounts::Account::new(0);
+    let account_id = account.id.clone();
+    let mut data = AppUsageData::default();
+    crate::accounts::reconcile(&mut data, std::slice::from_ref(&account));
+    data.accounts.get_mut(&account_id).unwrap().usage = Some({
+        let mut usage = crate::models::UsageData::default();
+        usage.reset_credits_available = Some(0);
+        usage
+    });
+
+    let key = format!("accounts.{account_id}");
+    let context = DataContext::from_usage_with_runtime(
+        Some(&data),
+        &Canvas::default(),
+        ThemeRuntime::new(false, true, false).with_language(LanguageId::Czech),
+    );
+    assert_eq!(
+        evaluate(&format!("{key}.reset_credits.present"), &context),
+        Ok(1.0)
+    );
+    assert_eq!(
+        evaluate(&format!("{key}.reset_credits.available_count"), &context),
+        Ok(0.0)
+    );
+    assert_eq!(
+        format_template(&format!("{{{key}.reset_credits.label}}"), &context),
+        "0 resetů k dispozici"
+    );
+    assert_eq!(
+        format_template(&format!("{{{key}.reset_credits.suffix}}"), &context),
+        " · 0 resetů k dispozici"
+    );
+
+    data.accounts
+        .get_mut(&account_id)
+        .unwrap()
+        .usage
+        .as_mut()
+        .unwrap()
+        .reset_credits_available = None;
+    let missing = DataContext::from_usage_with_runtime(
+        Some(&data),
+        &Canvas::default(),
+        ThemeRuntime::new(false, true, false),
+    );
+    assert_eq!(
+        evaluate(&format!("{key}.reset_credits.present"), &missing),
+        Ok(0.0)
+    );
+    assert_eq!(
+        format_template(&format!("{{{key}.reset_credits.suffix}}"), &missing),
+        ""
+    );
 }
 
 #[test]
@@ -378,6 +436,7 @@ fn schema_only_serializes_placement_fields_for_the_relevant_level() {
     theme.surfaces[0].placement.reference = ReferenceTarget {
         region: ReferenceRegion::Monitor,
         display: 1,
+        display_id: None,
     };
     let json = serde_json::to_value(&theme).unwrap();
     let root = &json["surfaces"][0];
@@ -463,6 +522,7 @@ fn reset_stats_and_duration_formats_are_available_to_every_provider() {
             },
             weekly: crate::models::UsageSection::default(),
             weekly_label: None,
+            reset_credits_available: None,
         },
     )]);
     let context = DataContext::from_usage(Some(&usage), &Canvas::default());

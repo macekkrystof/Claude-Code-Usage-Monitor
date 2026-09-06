@@ -184,6 +184,12 @@ pub(super) const TEXT_TEMPLATE_VALUES: &[TextTemplateValue] = &[
         kind: TextTemplateValueKind::Duration,
     },
     TextTemplateValue {
+        group: "Codex",
+        label: "Reset credits available",
+        expression: "codex.reset_credits.available_count",
+        kind: TextTemplateValueKind::Number,
+    },
+    TextTemplateValue {
         group: "Antigravity",
         label: "Session summary",
         expression: "antigravity.session",
@@ -869,6 +875,8 @@ pub(super) fn expression_variables_panel(
                         format!("{key}.has_error"),
                         format!("{key}.available"),
                         format!("{key}.updated_unix"),
+                        format!("{key}.reset_credits.available_count"),
+                        format!("{key}.reset_credits.present"),
                     ];
                     for window in ["session", "weekly"] {
                         for metric in [
@@ -925,6 +933,8 @@ pub(super) fn expression_variables_panel(
                         .map(|descriptor| (descriptor.display_name, descriptor.key)),
                 ) {
                     let mut names = vec![format!("{provider}.available")];
+                    names.push(format!("{provider}.reset_credits.available_count"));
+                    names.push(format!("{provider}.reset_credits.present"));
                     for window in ["session", "weekly"] {
                         for metric in ["percentage", "remaining"] {
                             names.push(format!("{provider}.{window}.{metric}"));

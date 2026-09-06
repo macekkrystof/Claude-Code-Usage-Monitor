@@ -1,31 +1,37 @@
 # Follow-up TODO
 
+All follow-ups in this file are complete for v2.4.0.
+
 ## Per-account Codex tray icons
 
-The Classic theme currently exposes one aggregate Codex notification-area icon.
-Add one tray icon for every visible Codex account so a second account is
-recognisable beside the existing Claude/Codex icons. Keep icon ordering aligned
-with `codex_accounts`, use each account's configured colour, and include the
-account name in the tooltip. Hidden accounts must not register an icon.
-
-Add renderer and tray synchronisation tests for zero, one, and multiple
-accounts, including account removal and Explorer/taskbar restart recovery.
+- [x] Classic creates one notification-area icon per Codex account, in
+  `codex_accounts` order.
+- [x] Each icon uses the account's configured colour and includes the account
+  name in its tooltip.
+- [x] Hidden accounts remain in the theme data for stable identity but do not
+  register an icon with Explorer.
+- [x] Renderer and tray synchronisation cover zero, one, and multiple accounts,
+  account removal, and Explorer/taskbar restart recovery.
 
 ## Show Codex reset availability
 
-Show the number of resets available for each Codex account next to its usage
-values when the upstream response provides that information. First identify the
-authoritative Codex/OpenAI field and its exact meaning; the current usage model
-only guarantees reset timestamps, so the UI must not infer or invent a count.
-Keep the value account-specific, localised, and safe when the field is missing.
-
-Add parser, cache, template, widget, and tray-tooltip tests for present,
-missing, and malformed reset-count values.
+- [x] Parse the authoritative
+  `rate_limit_reset_credits.available_count` response field without inferring
+  a value from reset timestamps. OpenAI documents the same value as
+  `rateLimitResetCredits.availableCount`.
+- [x] Keep the count account-specific, cached, localised, and safe when the
+  field is missing or malformed.
+- [x] Show it next to account usage values and in the account tray tooltip.
+- [x] Cover parser, cache, template, widget, and tray-tooltip behaviour for
+  present, zero, missing, null, and malformed values.
 
 ## Multi-monitor taskbar placement
 
-Revisit dragging and persisted placement when the widget is embedded in a
-taskbar on a single-monitor or changed-monitor setup. Preserve the current
-visible clamping behaviour, but make cross-taskbar movement and the saved
-offset predictable after monitor topology or DPI changes.
+- [x] Persist the Windows monitor device id alongside the legacy display index.
+- [x] Resolve saved placement by stable monitor id first, with a visible-index
+  fallback when the monitor is unavailable.
+- [x] Retarget a dragged widget across taskbars and re-normalise saved offsets
+  after monitor topology or DPI changes while preserving visible clamping.
+- [x] Cover monitor reordering, missing monitor ids, cross-taskbar movement, and
+  logical offset clamping with focused tests.
 

@@ -1145,7 +1145,7 @@ pub(super) fn progress_direction_name(
     }
 }
 
-pub(super) fn reference_target_name(language: LanguageId, target: ReferenceTarget) -> String {
+pub(super) fn reference_target_name(language: LanguageId, target: &ReferenceTarget) -> String {
     let region = match target.region {
         ReferenceRegion::Monitor => language.text("Monitor"),
         ReferenceRegion::Taskbar => language.text("Taskbar"),

@@ -80,6 +80,23 @@ fn themed_icon_id(surface_index: usize) -> u32 {
     THEME_TRAY_ICON_ID_BASE.saturating_add(surface_index.min(u32::MAX as usize) as u32)
 }
 
+#[cfg(test)]
+fn themed_icon_ids(surface_indices: &[usize]) -> Vec<u32> {
+    surface_indices
+        .iter()
+        .copied()
+        .map(themed_icon_id)
+        .collect()
+}
+
+fn stale_themed_icon_ids(previous: &[u32], current: &[u32]) -> Vec<u32> {
+    previous
+        .iter()
+        .copied()
+        .filter(|id| !current.contains(id))
+        .collect()
+}
+
 pub fn themed_surface_index(id: u32) -> Option<usize> {
     (id >= THEME_TRAY_ICON_ID_BASE).then(|| (id - THEME_TRAY_ICON_ID_BASE) as usize)
 }
@@ -241,11 +258,7 @@ pub fn sync_themed(hwnd: HWND, icons: &[ThemedTrayIcon]) {
     let mut registered = REGISTERED_THEME_ICON_IDS
         .lock()
         .unwrap_or_else(|error| error.into_inner());
-    for id in registered
-        .iter()
-        .copied()
-        .filter(|id| !refreshed_ids.contains(id))
-    {
+    for id in stale_themed_icon_ids(&registered, &refreshed_ids) {
         remove_id(hwnd, id);
     }
     *registered = refreshed_ids;
@@ -330,5 +343,30 @@ mod tests {
     fn theme_icon_ids_do_not_overlap_the_application_icon() {
         assert_ne!(themed_icon_id(0), APP_TRAY_ICON_ID);
         assert_ne!(themed_icon_id(42), themed_icon_id(43));
+    }
+
+    #[test]
+    fn theme_icon_sync_preserves_order_for_zero_one_and_multiple_surfaces() {
+        assert_eq!(themed_icon_ids(&[]), Vec::<u32>::new());
+        assert_eq!(themed_icon_ids(&[7]), vec![themed_icon_id(7)]);
+        assert_eq!(
+            themed_icon_ids(&[7, 3, 11]),
+            vec![themed_icon_id(7), themed_icon_id(3), themed_icon_id(11)]
+        );
+    }
+
+    #[test]
+    fn theme_icon_sync_removes_removed_accounts_and_readds_after_explorer_restart() {
+        let previous = themed_icon_ids(&[7, 3]);
+        let current = themed_icon_ids(&[7]);
+        assert_eq!(
+            stale_themed_icon_ids(&previous, &current),
+            vec![themed_icon_id(3)]
+        );
+        assert!(stale_themed_icon_ids(&current, &current).is_empty());
+        // sync_themed always sends NIM_ADD (then NIM_MODIFY on an existing
+        // shell slot), so the same ordered set is sufficient after Explorer
+        // has discarded all previous registrations.
+        assert_eq!(themed_icon_ids(&[7]), current);
     }
 }

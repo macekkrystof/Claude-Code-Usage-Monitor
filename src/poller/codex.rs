@@ -4,6 +4,7 @@ use std::process::Command;
 use std::time::{Duration, UNIX_EPOCH};
 
 use serde::Deserialize;
+use serde_json::Value;
 
 use super::{build_agent, unix_to_system_time, PollError};
 use crate::diagnose;
@@ -26,6 +27,8 @@ struct CodexTokenData {
 #[derive(Deserialize)]
 pub(super) struct CodexUsageResponse {
     rate_limit: Option<Option<Box<CodexRateLimitDetails>>>,
+    #[serde(default)]
+    rate_limit_reset_credits: Option<Value>,
 }
 
 #[derive(Deserialize)]
@@ -100,8 +103,11 @@ pub(super) fn fetch_codex_usage(
 }
 
 pub(super) fn codex_usage_from_response(response: CodexUsageResponse) -> Option<UsageData> {
+    let reset_credits_available =
+        reset_credits_available(response.rate_limit_reset_credits.as_ref());
     let details = *response.rate_limit.flatten()?;
     let mut data = UsageData::default();
+    data.reset_credits_available = reset_credits_available;
 
     if let Some(window) = details.primary_window.flatten() {
         data.session = codex_section_from_window(&window);
@@ -112,6 +118,13 @@ pub(super) fn codex_usage_from_response(response: CodexUsageResponse) -> Option<
     }
 
     Some(data)
+}
+
+fn reset_credits_available(value: Option<&Value>) -> Option<u32> {
+    value?
+        .get("available_count")?
+        .as_u64()
+        .and_then(|count| u32::try_from(count).ok())
 }
 
 pub(super) fn codex_section_from_window(window: &CodexRateLimitWindow) -> UsageSection {
@@ -258,6 +271,51 @@ fn wait_for_refresh(child: &mut std::process::Child) {
             }
             Ok(None) => std::thread::sleep(Duration::from_millis(500)),
             Err(_) => break,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn response(reset_credits: Value) -> CodexUsageResponse {
+        serde_json::from_value(serde_json::json!({
+            "rate_limit": {
+                "primary_window": {
+                    "used_percent": 23.0,
+                    "reset_at": 1_800_000_000_i64
+                }
+            },
+            "rate_limit_reset_credits": reset_credits
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn parses_authoritative_reset_credit_count() {
+        let usage = codex_usage_from_response(response(serde_json::json!({
+            "available_count": 3
+        })))
+        .unwrap();
+        assert_eq!(usage.reset_credits_available, Some(3));
+        assert_eq!(usage.session.percentage, 23.0);
+    }
+
+    #[test]
+    fn missing_null_and_malformed_reset_credit_counts_are_safe() {
+        for value in [
+            serde_json::json!(null),
+            serde_json::json!({}),
+            serde_json::json!({"available_count": "3"}),
+            serde_json::json!({"available_count": -1}),
+            serde_json::json!({"available_count": 4.5}),
+            serde_json::json!({"available_count": u64::from(u32::MAX) + 1}),
+            serde_json::json!("unexpected"),
+        ] {
+            let usage = codex_usage_from_response(response(value)).unwrap();
+            assert_eq!(usage.reset_credits_available, None);
+            assert_eq!(usage.session.percentage, 23.0);
         }
     }
 }

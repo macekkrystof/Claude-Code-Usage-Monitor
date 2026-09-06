@@ -39,7 +39,8 @@ use crate::providers::{ProviderId, ProviderSet};
 use crate::theme;
 use crate::theme_engine::{
     self, Canvas, DataContext, HorizontalAnchor, MouseActionEffect, MouseActionOverrideKey,
-    MouseEventKind, ReferenceRegion, SurfaceNest, ThemeDocument, ThemeRuntime, VerticalAnchor,
+    MouseEventKind, ReferenceRegion, ReferenceTarget, SurfaceNest, ThemeDocument, ThemeRuntime,
+    VerticalAnchor,
 };
 use crate::tray_icon;
 use crate::updater::{self, InstallChannel, ReleaseDescriptor, UpdateCheckResult};
@@ -198,8 +199,8 @@ fn display_scale(display_index: usize) -> f64 {
     let displays = native_interop::find_monitors();
     let Some(display) = displays
         .get(display_index)
-        .copied()
-        .or_else(|| displays.first().copied())
+        .cloned()
+        .or_else(|| displays.first().cloned())
     else {
         return 1.0;
     };
@@ -220,6 +221,24 @@ fn display_scale(display_index: usize) -> f64 {
     }
 }
 
+fn display_scale_for_reference(reference: &ReferenceTarget) -> f64 {
+    let displays = native_interop::find_monitors();
+    let display_index = resolve_display_index(reference, &displays);
+    let Some(display) = displays.get(display_index).or_else(|| displays.first()) else {
+        return 1.0;
+    };
+    let mut dpi_x = 96;
+    let mut dpi_y = 96;
+    if unsafe { GetDpiForMonitor(display.handle, MDT_EFFECTIVE_DPI, &mut dpi_x, &mut dpi_y) }
+        .is_ok()
+        && dpi_x > 0
+    {
+        (dpi_x as f64 / 96.0).clamp(0.25, 8.0)
+    } else {
+        display_scale(display_index)
+    }
+}
+
 fn migrated_theme_placement(legacy: LegacyPlacement) -> (usize, i32) {
     let displays = native_interop::find_monitors();
     let taskbars = native_interop::find_taskbars();
@@ -237,6 +256,25 @@ fn migrated_theme_placement(legacy: LegacyPlacement) -> (usize, i32) {
     (display_index, offset_x)
 }
 
+fn ensure_theme_display_ids(theme: &mut ThemeDocument) -> bool {
+    let displays = native_interop::find_monitors();
+    let mut changed = false;
+    for surface in &mut theme.surfaces {
+        let display_index = resolve_display_index(&surface.placement.reference, &displays);
+        let Some(display) = displays.get(display_index) else {
+            continue;
+        };
+        if surface.placement.reference.display_id.as_deref() != Some(display.id.as_str()) {
+            surface.placement.reference.display_id = Some(display.id.clone());
+            changed = true;
+        }
+    }
+    if changed {
+        theme.prepare_runtime();
+    }
+    changed
+}
+
 fn legacy_offset_to_theme_offset(tray_offset: i32, scale: f64) -> i32 {
     let scale = if scale.is_finite() && scale > 0.0 {
         scale
@@ -247,12 +285,12 @@ fn legacy_offset_to_theme_offset(tray_offset: i32, scale: f64) -> i32 {
 }
 
 fn theme_surface_scale(theme: &ThemeDocument, surface_index: usize) -> f64 {
-    let display_index = theme
+    let reference = theme
         .surfaces
         .get(surface_index)
-        .map(|surface| surface.placement.reference.display)
-        .unwrap_or(theme.placement.reference.display);
-    display_scale(display_index)
+        .map(|surface| &surface.placement.reference)
+        .unwrap_or(&theme.placement.reference);
+    display_scale_for_reference(reference)
 }
 
 fn scaled_theme_dimension(logical: u32, scale: f64) -> i32 {
@@ -425,6 +463,28 @@ fn tray_icon_tooltip_from_state() -> String {
     }
 }
 
+fn themed_surface_tooltip(
+    surface: &theme_engine::SceneObject,
+    data: Option<&AppUsageData>,
+    language: LanguageId,
+) -> String {
+    let Some(account_id) = surface.id.strip_prefix("codex-account-tray-") else {
+        return surface.name.clone();
+    };
+    let Some(account) = data.and_then(|data| {
+        data.account_order
+            .iter()
+            .find(|account| account.id == account_id)
+    }) else {
+        return surface.name.clone();
+    };
+    theme_engine::codex_account_tray_tooltip(
+        account,
+        data.and_then(|data| data.accounts.get(account_id)),
+        language,
+    )
+}
+
 fn sync_tray_icon(hwnd: HWND) {
     let themed = {
         let state = lock_state();
@@ -489,7 +549,7 @@ fn sync_tray_icon(hwnd: HWND) {
                     );
                     Some(tray_icon::ThemedTrayIcon {
                         surface_index,
-                        tooltip: surface.name.clone(),
+                        tooltip: themed_surface_tooltip(surface, data.as_ref(), runtime.language),
                         width: rendered.width,
                         height: rendered.height,
                         pixels: rendered.pixels,
@@ -585,26 +645,32 @@ fn taskbar_at_point(pt: POINT) -> Option<(usize, native_interop::TaskbarWindow)>
 /// Find the taskbar hosting the display a custom theme surface is placed on.
 fn taskbar_for_display(display_index: usize) -> Option<native_interop::TaskbarWindow> {
     let displays = native_interop::find_monitors();
-    let display = displays.get(display_index).copied()?;
+    let display = displays.get(display_index)?;
     native_interop::find_taskbars().into_iter().find(|taskbar| {
         (unsafe { MonitorFromWindow(taskbar.hwnd, MONITOR_DEFAULTTOPRIMARY) }) == display.handle
     })
 }
 
-/// The display index owning the taskbar under `pt`, if any.
-fn display_at_taskbar_point(pt: POINT) -> Option<usize> {
+/// The display index and stable device id owning the taskbar under `pt`, if any.
+fn display_at_taskbar_point(pt: POINT) -> Option<(usize, String)> {
     let (_, taskbar) = taskbar_at_point(pt)?;
     let monitor = unsafe { MonitorFromWindow(taskbar.hwnd, MONITOR_DEFAULTTOPRIMARY) };
-    native_interop::find_monitors()
+    let displays = native_interop::find_monitors();
+    displays
         .iter()
         .position(|display| display.handle == monitor)
+        .and_then(|index| {
+            displays
+                .get(index)
+                .map(|display| (index, display.id.clone()))
+        })
 }
 
 /// While dragging, hop the surface to whichever taskbar the cursor is over,
 /// re-anchoring the drag so the widget follows the cursor across monitors
 /// instead of pinning to the original taskbar's edge until drop.
 fn live_retarget_custom_theme(pt: POINT) {
-    let Some(target_display) = display_at_taskbar_point(pt) else {
+    let Some((target_display, target_display_id)) = display_at_taskbar_point(pt) else {
         return;
     };
     {
@@ -618,12 +684,16 @@ fn live_retarget_custom_theme(pt: POINT) {
         let Some(surface) = theme.surfaces.first_mut() else {
             return;
         };
-        if surface.placement.reference.display == target_display {
+        if surface.placement.reference.display == target_display
+            && surface.placement.reference.display_id.as_deref() == Some(target_display_id.as_str())
+        {
             return;
         }
         surface.placement.reference.display = target_display;
+        surface.placement.reference.display_id = Some(target_display_id.clone());
         surface.placement.offset_x = 0;
         theme.placement.reference.display = target_display;
+        theme.placement.reference.display_id = Some(target_display_id.clone());
         theme.placement.offset_x = 0;
     }
     // Land at the new taskbar's default spot first to learn the offset->x
@@ -712,20 +782,31 @@ fn drag_custom_theme_move(pt: POINT) {
 fn finish_custom_theme_drag(target_taskbar: Option<native_interop::TaskbarWindow>) {
     let target_display = target_taskbar.and_then(|taskbar| {
         let monitor = unsafe { MonitorFromWindow(taskbar.hwnd, MONITOR_DEFAULTTOPRIMARY) };
-        native_interop::find_monitors()
+        let displays = native_interop::find_monitors();
+        displays
             .iter()
             .position(|display| display.handle == monitor)
+            .and_then(|index| {
+                displays
+                    .get(index)
+                    .map(|display| (index, display.id.clone()))
+            })
     });
     let theme_to_save = {
         let mut state = lock_state();
         let Some(theme) = state.as_mut().and_then(|s| s.active_theme.as_mut()) else {
             return;
         };
-        if let Some(target_display) = target_display {
+        if let Some((target_display, target_display_id)) = target_display {
             if let Some(surface) = theme.surfaces.first_mut() {
-                if surface.placement.reference.display != target_display {
+                if surface.placement.reference.display != target_display
+                    || surface.placement.reference.display_id.as_deref()
+                        != Some(target_display_id.as_str())
+                {
                     surface.placement.reference.display = target_display;
+                    surface.placement.reference.display_id = Some(target_display_id.clone());
                     theme.placement.reference.display = target_display;
+                    theme.placement.reference.display_id = Some(target_display_id);
                 }
             }
         }
@@ -1633,7 +1714,7 @@ pub fn run() {
                 save_settings_or_log(&settings, "unable to consume legacy visibility");
             }
         }
-        let (active_theme_path, active_theme) = configured_theme
+        let (active_theme_path, mut active_theme) = configured_theme
             .map(|theme| (configured_theme_path, Some(theme)))
             .unwrap_or_else(|| {
                 let path = classic_theme_path;
@@ -1643,6 +1724,15 @@ pub fn run() {
                     .or_else(|| Some(ThemeDocument::starter()));
                 (path, theme)
             });
+        if let Some(theme) = active_theme.as_mut() {
+            if ensure_theme_display_ids(theme) && !theme.is_builtin() {
+                if let Err(error) = theme_engine::save_theme(theme) {
+                    diagnose::log(format!(
+                        "unable to persist stable monitor identity in theme: {error}"
+                    ));
+                }
+            }
+        }
         let custom_theme_enabled = true;
         if let Some(path) = &active_theme_path {
             let path = path.to_string_lossy().into_owned();
@@ -1928,7 +2018,7 @@ fn render_layered() {
         render_custom_window(target_hwnd, &rendered, desktop_nested);
         unsafe {
             let show = nest != SurfaceNest::Floating
-                || !foreground_is_fullscreen_on_display(positioned.placement.reference.display);
+                || !foreground_is_fullscreen_on_reference(&positioned.placement.reference);
             let _ = ShowWindow(target_hwnd, if show { SW_SHOWNOACTIVATE } else { SW_HIDE });
         }
     }

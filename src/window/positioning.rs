@@ -23,7 +23,37 @@ pub(super) fn position_at_taskbar() {
             }
         })
     };
-    if let Some((hwnd, theme, scale)) = custom_position {
+    if let Some((hwnd, mut theme, scale)) = custom_position {
+        if let Some(offset_x) = normalized_custom_theme_offset(&theme, scale) {
+            if offset_x != theme.placement.offset_x {
+                theme.placement.offset_x = offset_x;
+                if let Some(surface) = theme.surfaces.first_mut() {
+                    surface.placement.offset_x = offset_x;
+                }
+                let theme_to_save = {
+                    let mut state = lock_state();
+                    if let Some(active_theme) =
+                        state.as_mut().and_then(|state| state.active_theme.as_mut())
+                    {
+                        if let Some(surface) = active_theme.surfaces.first_mut() {
+                            surface.placement.offset_x = offset_x;
+                        }
+                        active_theme.placement.offset_x = offset_x;
+                        (active_theme.id != theme_engine::CLASSIC_THEME_ID)
+                            .then(|| active_theme.clone())
+                    } else {
+                        None
+                    }
+                };
+                if let Some(theme_to_save) = theme_to_save {
+                    if let Err(error) = theme_engine::save_theme(&theme_to_save) {
+                        diagnose::log(format!(
+                            "unable to persist clamped custom theme placement: {error}"
+                        ));
+                    }
+                }
+            }
+        }
         position_custom_theme(hwnd, &theme, scale);
         return;
     }
@@ -223,11 +253,11 @@ pub(super) fn position_custom_theme(hwnd: HWND, theme: &ThemeDocument, scale: f6
 pub(super) fn position_custom_theme_internal(hwnd: HWND, theme: &ThemeDocument, scale: f64) {
     let taskbars = native_interop::find_taskbars();
     let displays = native_interop::find_monitors();
-    let display_index = theme.placement.reference.display;
+    let display_index = resolve_display_index(&theme.placement.reference, &displays);
     let selected_display = displays
         .get(display_index)
-        .copied()
-        .or_else(|| displays.first().copied());
+        .cloned()
+        .or_else(|| displays.first().cloned());
     let Some(display) = selected_display else {
         return;
     };
@@ -397,9 +427,7 @@ pub(super) fn sync_theme_window_visibility() {
             let should_show =
                 theme_engine::surface_should_render(&theme, surface_index, data.as_ref(), runtime)
                     && (nest != SurfaceNest::Floating
-                        || !foreground_is_fullscreen_on_display(
-                            surface.placement.reference.display,
-                        ));
+                        || !foreground_is_fullscreen_on_reference(&surface.placement.reference));
             if should_show {
                 let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
                 if nest == SurfaceNest::Floating {
@@ -420,7 +448,7 @@ pub(super) fn sync_theme_window_visibility() {
     }
 }
 
-pub(super) fn foreground_is_fullscreen_on_display(display_index: usize) -> bool {
+pub(super) fn foreground_is_fullscreen_on_reference(reference: &ReferenceTarget) -> bool {
     unsafe {
         let foreground = GetForegroundWindow();
         if foreground.is_invalid()
@@ -456,10 +484,11 @@ pub(super) fn foreground_is_fullscreen_on_display(display_index: usize) -> bool 
         }
 
         let displays = native_interop::find_monitors();
+        let display_index = resolve_display_index(reference, &displays);
         let Some(display) = displays
             .get(display_index)
-            .copied()
-            .or_else(|| displays.first().copied())
+            .cloned()
+            .or_else(|| displays.first().cloned())
         else {
             return false;
         };
@@ -480,6 +509,87 @@ pub(super) fn foreground_is_fullscreen_on_display(display_index: usize) -> bool 
         }
         rect_covers_monitor(rect, display.rect)
     }
+}
+
+pub(super) fn resolve_display_index(
+    reference: &ReferenceTarget,
+    displays: &[native_interop::DisplayMonitor],
+) -> usize {
+    reference
+        .display_id
+        .as_deref()
+        .and_then(|id| displays.iter().position(|display| display.id == id))
+        .unwrap_or(reference.display)
+        .min(displays.len().saturating_sub(1))
+}
+
+/// Convert a currently clamped physical origin back into the logical offset
+/// persisted by a theme. This keeps the next drag stable after a taskbar,
+/// monitor topology, or DPI change instead of repeatedly displaying a
+/// different clamped position for the same stale offset.
+pub(super) fn normalized_custom_theme_offset(theme: &ThemeDocument, scale: f64) -> Option<i32> {
+    let taskbars = native_interop::find_taskbars();
+    let displays = native_interop::find_monitors();
+    let display_index = resolve_display_index(&theme.placement.reference, &displays);
+    let display = displays.get(display_index)?;
+    let taskbar = taskbars.iter().find(|taskbar| unsafe {
+        MonitorFromWindow(taskbar.hwnd, MONITOR_DEFAULTTOPRIMARY) == display.handle
+    })?;
+    let reference = match theme.placement.reference.region {
+        ReferenceRegion::Monitor => display.rect,
+        ReferenceRegion::Taskbar => taskbar.rect,
+        ReferenceRegion::SystemTray => {
+            native_interop::find_child_window(taskbar.hwnd, "TrayNotifyWnd")
+                .and_then(native_interop::get_window_rect_safe)
+                .or(Some(RECT {
+                    left: taskbar.rect.right,
+                    top: taskbar.rect.top,
+                    right: taskbar.rect.right,
+                    bottom: taskbar.rect.bottom,
+                }))
+                .unwrap_or(display.rect)
+        }
+    };
+    let width = scaled_theme_dimension(theme.canvas.width.max(1), scale);
+    let reference_width = reference.right - reference.left;
+    let surface_horizontal = theme
+        .placement
+        .surface_horizontal
+        .unwrap_or(theme.placement.horizontal);
+    let base = aligned_origin(
+        reference.left,
+        reference_width,
+        width,
+        horizontal_anchor_factor(theme.placement.horizontal),
+        horizontal_anchor_factor(surface_horizontal),
+        0,
+    );
+    Some(logical_offset_after_clamp(
+        theme.placement.offset_x,
+        base,
+        scale,
+        width,
+        taskbar.rect.left,
+        taskbar.rect.right,
+    ))
+}
+
+pub(super) fn logical_offset_after_clamp(
+    offset: i32,
+    origin_without_offset: i32,
+    scale: f64,
+    surface_length: i32,
+    bounds_start: i32,
+    bounds_end: i32,
+) -> i32 {
+    let scale = if scale.is_finite() && scale > 0.0 {
+        scale
+    } else {
+        1.0
+    };
+    let origin = origin_without_offset + (offset as f64 * scale).round() as i32;
+    let clamped = clamp_origin_to_bounds(origin, surface_length, bounds_start, bounds_end);
+    offset + ((clamped - origin) as f64 / scale).round() as i32
 }
 
 pub(super) fn rect_covers_monitor(rect: RECT, monitor: RECT) -> bool {
@@ -578,5 +688,55 @@ pub(super) unsafe extern "system" fn on_tray_location_changed(
             position_at_taskbar();
             render_layered();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn display(id: &str, left: i32) -> native_interop::DisplayMonitor {
+        native_interop::DisplayMonitor {
+            handle: HMONITOR::default(),
+            rect: RECT {
+                left,
+                top: 0,
+                right: left + 1920,
+                bottom: 1080,
+            },
+            primary: left == 0,
+            id: id.into(),
+        }
+    }
+
+    #[test]
+    fn stable_monitor_identity_wins_over_changed_enumeration_order() {
+        let displays = vec![display("DISPLAY2", 1920), display("DISPLAY1", 0)];
+        let reference = ReferenceTarget {
+            display: 0,
+            display_id: Some("DISPLAY1".into()),
+            ..Default::default()
+        };
+        assert_eq!(resolve_display_index(&reference, &displays), 1);
+    }
+
+    #[test]
+    fn missing_monitor_identity_falls_back_to_a_visible_display() {
+        let displays = vec![display("DISPLAY1", 0)];
+        let reference = ReferenceTarget {
+            display: 4,
+            display_id: Some("DISPLAY9".into()),
+            ..Default::default()
+        };
+        assert_eq!(resolve_display_index(&reference, &displays), 0);
+    }
+
+    #[test]
+    fn clamped_physical_position_is_persisted_as_a_logical_offset() {
+        assert_eq!(logical_offset_after_clamp(300, 100, 1.5, 100, 0, 500), 200);
+        assert_eq!(
+            logical_offset_after_clamp(-300, -100, 2.0, 100, -1920, 0),
+            -300
+        );
     }
 }

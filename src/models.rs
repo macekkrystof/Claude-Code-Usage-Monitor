@@ -18,6 +18,10 @@ pub struct UsageData {
     pub weekly: UsageSection,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub weekly_label: Option<String>,
+    /// Number of earned Codex reset credits available to this account.
+    /// Other providers leave this unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reset_credits_available: Option<u32>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -178,5 +182,32 @@ mod tests {
         );
         assert!(decoded.get(ProviderId::Antigravity).is_none());
         assert!(decoded.get(ProviderId::OpenCode).is_none());
+    }
+
+    #[test]
+    fn usage_cache_round_trips_reset_credit_count_and_accepts_old_entries() {
+        let mut usage = UsageData::default();
+        usage.reset_credits_available = Some(4);
+        let data = AppUsageData::from_iter([(ProviderId::Codex, usage)]);
+        let json = serde_json::to_value(&data).unwrap();
+        assert_eq!(json["codex"]["reset_credits_available"], 4);
+        let decoded: AppUsageData = serde_json::from_value(json).unwrap();
+        assert_eq!(
+            decoded
+                .get(ProviderId::Codex)
+                .and_then(|usage| usage.reset_credits_available),
+            Some(4)
+        );
+
+        let legacy: AppUsageData = serde_json::from_str(
+            r#"{"codex":{"session":{"percentage":1,"resets_at":null},"weekly":{"percentage":2,"resets_at":null}}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            legacy
+                .get(ProviderId::Codex)
+                .and_then(|usage| usage.reset_credits_available),
+            None
+        );
     }
 }

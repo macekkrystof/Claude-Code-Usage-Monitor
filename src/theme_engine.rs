@@ -182,12 +182,16 @@ impl Placement {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReferenceTarget {
     #[serde(default)]
     pub region: ReferenceRegion,
     #[serde(default)]
     pub display: usize,
+    /// Stable Windows monitor device name. `display` remains the backwards-
+    /// compatible fallback for themes saved before monitor identities existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_id: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1283,6 +1287,10 @@ impl DataContext {
         context.insert_string("i18n.hour_suffix", strings.hour_suffix);
         context.insert_string("i18n.minute_suffix", strings.minute_suffix);
         context.insert_string("i18n.second_suffix", strings.second_suffix);
+        context.insert_string(
+            "i18n.resets_available",
+            runtime.language.text("resets available"),
+        );
         context.insert("providers.count", runtime.provider_count() as f64);
         for descriptor in PROVIDER_DESCRIPTORS {
             context.insert(
@@ -1373,6 +1381,34 @@ impl DataContext {
         self.insert(&format!("{name}.weekly.percentage"), weekly);
         self.insert(&format!("{name}.weekly.remaining"), 100.0 - weekly);
         self.insert(&format!("{name}.available"), usage.is_some() as u8 as f64);
+        let reset_credits_available = usage.and_then(|value| value.reset_credits_available);
+        self.insert(
+            &format!("{name}.reset_credits.available_count"),
+            reset_credits_available.unwrap_or(0) as f64,
+        );
+        self.insert(
+            &format!("{name}.reset_credits.present"),
+            reset_credits_available.is_some() as u8 as f64,
+        );
+        let reset_credits_label = reset_credits_available
+            .map(|count| {
+                format!(
+                    "{count} {}",
+                    self.get_string("i18n.resets_available")
+                        .unwrap_or("resets available")
+                )
+            })
+            .unwrap_or_default();
+        let reset_credits_suffix = if reset_credits_label.is_empty() {
+            String::new()
+        } else {
+            format!(" · {reset_credits_label}")
+        };
+        self.insert_string(&format!("{name}.reset_credits.label"), reset_credits_label);
+        self.insert_string(
+            &format!("{name}.reset_credits.suffix"),
+            reset_credits_suffix,
+        );
         let reset_value = |reset: Option<std::time::SystemTime>| {
             let unix = reset
                 .and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok())
@@ -1410,7 +1446,12 @@ impl DataContext {
             let field = account_field(&name)?;
             if matches!(
                 field,
-                "enabled" | "has_error" | "available" | "updated_unix"
+                "enabled"
+                    | "has_error"
+                    | "available"
+                    | "updated_unix"
+                    | "reset_credits.available_count"
+                    | "reset_credits.present"
             ) {
                 return Some(0.0);
             }
@@ -1440,6 +1481,7 @@ impl DataContext {
                 "color" => Some("#808080FF"),
                 "identity" | "status" => Some(""),
                 "weekly.label" => Some("7d"),
+                "reset_credits.label" | "reset_credits.suffix" => Some(""),
                 _ => None,
             })
     }
@@ -2328,7 +2370,7 @@ pub use theme_rendering::*;
 mod theme_expression;
 pub use theme_expression::*;
 mod account_classic;
-pub use account_classic::account_classic;
+pub use account_classic::{account_classic, codex_account_tray_tooltip};
 fn schema_version() -> u32 {
     THEME_SCHEMA_VERSION
 }

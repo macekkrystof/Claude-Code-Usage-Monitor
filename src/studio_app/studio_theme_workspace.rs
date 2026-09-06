@@ -519,6 +519,8 @@ impl StudioApp {
                                     ("Name", "name"),
                                     ("Colour", "color"),
                                     ("Status", "status"),
+                                    ("Reset credits", "reset_credits.label"),
+                                    ("Reset count", "reset_credits.available_count:0"),
                                     ("5h", "session:usage_line"),
                                     ("7d", "weekly:usage_line"),
                                 ] {
@@ -1751,21 +1753,32 @@ impl StudioApp {
                         .max(1.0);
                     Dropdown::from_id_salt(("reference", index))
                         .width(reference_width)
-                        .selected_text(reference_target_name(language, surface.placement.reference))
+                        .selected_text(reference_target_name(
+                            language,
+                            &surface.placement.reference,
+                        ))
                         .show_ui(ui, |ui| {
-                            let display_count = native_interop::find_monitors().len().max(1);
+                            let displays = native_interop::find_monitors();
+                            let display_count = displays.len().max(1);
                             for display in 0..display_count {
                                 for region in [
                                     ReferenceRegion::Monitor,
                                     ReferenceRegion::Taskbar,
                                     ReferenceRegion::SystemTray,
                                 ] {
-                                    let target = ReferenceTarget { region, display };
+                                    let target = ReferenceTarget {
+                                        region,
+                                        display,
+                                        display_id: displays
+                                            .get(display)
+                                            .map(|display| display.id.clone()),
+                                    };
+                                    let target_name = reference_target_name(language, &target);
                                     dropdown_selectable_value(
                                         ui,
                                         &mut surface.placement.reference,
                                         target,
-                                        reference_target_name(language, target),
+                                        target_name,
                                     );
                                 }
                             }

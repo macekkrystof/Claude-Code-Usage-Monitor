@@ -3,7 +3,7 @@ use std::sync::Mutex;
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{BOOL, HWND, LPARAM, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO,
+    EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO, MONITORINFOEXW,
 };
 use windows::Win32::UI::Accessibility::{SetWinEventHook, UnhookWinEvent, HWINEVENTHOOK};
 use windows::Win32::UI::Shell::{SHAppBarMessage, ABM_GETTASKBARPOS, APPBARDATA};
@@ -44,11 +44,14 @@ pub struct TaskbarWindow {
     pub rect: RECT,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct DisplayMonitor {
     pub handle: HMONITOR,
     pub rect: RECT,
     pub primary: bool,
+    /// Stable device name (for example `\\.\DISPLAY1`) used to survive
+    /// monitor enumeration reordering after topology changes.
+    pub id: String,
 }
 
 /// Parenting and sibling placement for a desktop-nested theme surface.
@@ -67,15 +70,30 @@ pub fn find_monitors() -> Vec<DisplayMonitor> {
         data: LPARAM,
     ) -> BOOL {
         let result = &mut *(data.0 as *mut Vec<DisplayMonitor>);
-        let mut info = MONITORINFO {
-            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+        let mut info = MONITORINFOEXW {
+            monitorInfo: MONITORINFO {
+                cbSize: std::mem::size_of::<MONITORINFOEXW>() as u32,
+                ..Default::default()
+            },
             ..Default::default()
         };
-        if unsafe { GetMonitorInfoW(monitor, &mut info).as_bool() } {
+        if unsafe {
+            GetMonitorInfoW(
+                monitor,
+                &mut info as *mut MONITORINFOEXW as *mut MONITORINFO,
+            )
+            .as_bool()
+        } {
+            let id_length = info
+                .szDevice
+                .iter()
+                .position(|character| *character == 0)
+                .unwrap_or(info.szDevice.len());
             result.push(DisplayMonitor {
                 handle: monitor,
-                rect: info.rcMonitor,
-                primary: info.dwFlags & MONITORINFOF_PRIMARY != 0,
+                rect: info.monitorInfo.rcMonitor,
+                primary: info.monitorInfo.dwFlags & MONITORINFOF_PRIMARY != 0,
+                id: String::from_utf16_lossy(&info.szDevice[..id_length]),
             });
         }
         BOOL(1)
